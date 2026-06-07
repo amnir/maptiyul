@@ -123,6 +123,11 @@
     .pop-title { font-weight: 800; font-size: 15px; margin: 0 0 6px; line-height: 1.25; }
     .pop-addr { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
     .pop-dist { font-size: 12px; font-weight: 700; color: var(--accent); margin: 0 0 6px; }
+    .fav-btn { width: 100%; margin: 0 0 8px; padding: 7px; border: 1px solid var(--line);
+      background: #fff; border-radius: 9px; font-family: inherit; font-size: 13px; font-weight: 700;
+      cursor: pointer; color: var(--ink); }
+    .fav-btn:hover { background: #fff7e6; }
+    .fav-btn.on { background: #fff2cc; border-color: #f0c14b; color: #8a6d1a; }
     .pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
     .pop-tag { font-size: 11px; background: #eef3f5; color: #34566a; padding: 2px 8px; border-radius: 999px; }
     .pop-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
@@ -171,6 +176,7 @@
 
         <div class="quickbar">
           <button id="locate" class="qbtn">📍 קרוב אליי</button>
+          <button id="favToggle" class="qbtn">☆ מועדפים (<span id="favCount">0</span>)</button>
         </div>
         <div id="radiusWrap" class="radiuswrap">
           <span>מרחק:</span>
@@ -220,6 +226,30 @@
     const DEFAULT_REGION = { cls: "r-center", color: "#64748b" };
 
     const data = (window.ATTRACTIONS || []).filter(a => a.lat && a.lng);
+    data.forEach((a, i) => {
+      a._i = i;
+      a.id = (a.sources && a.sources[0] && a.sources[0].url) || `${a.title}|${a.lat}|${a.lng}`;
+    });
+
+    // ---- Favorites (persisted in the browser) ----
+    const FAV_KEY = "maptiyul_favs";
+    let favorites = new Set();
+    try { favorites = new Set(JSON.parse(localStorage.getItem(FAV_KEY) || "[]")); } catch (e) {}
+    function saveFavs() { try { localStorage.setItem(FAV_KEY, JSON.stringify([...favorites])); } catch (e) {} }
+    function updateFavCount() { document.getElementById("favCount").textContent = favorites.size; }
+    function toggleFav(i, btn) {
+      const a = data[i];
+      if (!a) return;
+      if (favorites.has(a.id)) favorites.delete(a.id); else favorites.add(a.id);
+      saveFavs();
+      updateFavCount();
+      if (btn) {
+        const on = favorites.has(a.id);
+        btn.classList.toggle("on", on);
+        btn.textContent = on ? "★ שמור במועדפים" : "☆ הוסף למועדפים";
+      }
+      if (state.favOnly) render();
+    }
 
     const map = L.map("map", { zoomControl: true }).setView([31.4, 35.0], 8);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -252,6 +282,7 @@
       sources: new Set(sources),
       q: "",
       radiusKm: 0,
+      favOnly: false,
     };
 
     // ---- Location / distance ----
@@ -353,6 +384,11 @@
       state.radiusKm = Number(e.target.value);
       render();
     };
+    document.getElementById("favToggle").onclick = () => {
+      state.favOnly = !state.favOnly;
+      document.getElementById("favToggle").classList.toggle("active", state.favOnly);
+      render();
+    };
 
     // ---- Markers ----
     function markerIcon(region) {
@@ -379,12 +415,15 @@
         <a class="nav-btn waze" href="${waze}" target="_blank" rel="noopener">Waze</a>
         <a class="nav-btn gmaps" href="${gmaps}" target="_blank" rel="noopener">Google Maps</a>
       </div>`;
+      const on = favorites.has(a.id);
+      const fav = `<button class="fav-btn ${on ? "on" : ""}" onclick="toggleFav(${a._i}, this)">${on ? "★ שמור במועדפים" : "☆ הוסף למועדפים"}</button>`;
       return `${img}<div class="pop-body">
         <p class="pop-title">${esc(a.title)}</p>
         ${dist}
         ${addr}
         <div class="pop-tags">${tags}</div>
         ${nav}
+        ${fav}
         <div class="pop-links">${links}</div>
       </div>`;
     }
@@ -400,6 +439,7 @@
       if (!state.regions.has(a.region)) return false;
       if (!(a.sources || []).some(s => state.sources.has(s.name))) return false;
       if (userLatLng && state.radiusKm > 0 && distanceKm(a) > state.radiusKm) return false;
+      if (state.favOnly && !favorites.has(a.id)) return false;
       const ts = a.types || [];
       if (ts.length === 0) { if (state.types.size === 0) return false; }
       else if (!ts.some(t => state.types.has(t))) return false;
@@ -417,6 +457,7 @@
       document.getElementById("count").textContent = shown.length.toLocaleString("he-IL");
     }
 
+    updateFavCount();
     render();
     if (markers.length) {
       try { map.fitBounds(L.latLngBounds(data.map(a => [a.lat, a.lng])).pad(0.05)); } catch (e) {}
