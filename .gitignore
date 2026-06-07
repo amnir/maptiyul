@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+.playwright-mcp/
+# Large, regenerable scrape intermediates (rebuild with scrape/*.py)
+data/posts.json
+data/urls.txt
