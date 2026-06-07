@@ -101,6 +101,19 @@
     .btn:hover { background: #f4f7f9; }
     .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
 
+    .quickbar { display: flex; gap: 8px; margin-top: 10px; }
+    .qbtn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      padding: 9px; border: 1px solid var(--line); background: #fff; border-radius: 10px;
+      font-size: 13px; font-family: inherit; cursor: pointer; transition: .12s; }
+    .qbtn:hover { background: #f4f7f9; }
+    .qbtn.active { background: var(--accent); color: #fff; border-color: transparent; }
+    .radiuswrap { display: none; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+    .radiuswrap.show { display: flex; }
+    .radiuswrap select { flex: 1; padding: 7px; border: 1px solid var(--line); border-radius: 9px;
+      font-family: inherit; font-size: 13px; }
+    .user-dot { width: 16px; height: 16px; border-radius: 50%; background: #2f6fd0;
+      border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(47,111,208,.3); }
+
     /* Map */
     #map { flex: 1; height: 100%; }
     .leaflet-popup-content { margin: 0; width: 240px !important; }
@@ -109,6 +122,7 @@
     .pop-body { padding: 10px 12px 12px; }
     .pop-title { font-weight: 800; font-size: 15px; margin: 0 0 6px; line-height: 1.25; }
     .pop-addr { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+    .pop-dist { font-size: 12px; font-weight: 700; color: var(--accent); margin: 0 0 6px; }
     .pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
     .pop-tag { font-size: 11px; background: #eef3f5; color: #34566a; padding: 2px 8px; border-radius: 999px; }
     .pop-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
@@ -154,6 +168,20 @@
       </div>
       <div class="side-body">
         <input id="search" class="search" type="search" placeholder="חיפוש לפי שם או מילת מפתח…" />
+
+        <div class="quickbar">
+          <button id="locate" class="qbtn">📍 קרוב אליי</button>
+        </div>
+        <div id="radiusWrap" class="radiuswrap">
+          <span>מרחק:</span>
+          <select id="radius">
+            <option value="0">ללא הגבלה</option>
+            <option value="10">עד 10 ק״מ</option>
+            <option value="25">עד 25 ק״מ</option>
+            <option value="50">עד 50 ק״מ</option>
+            <option value="100">עד 100 ק״מ</option>
+          </select>
+        </div>
 
         <div class="group">
           <h2>אזור</h2>
@@ -223,7 +251,32 @@
       types: new Set(allTypes),
       sources: new Set(sources),
       q: "",
+      radiusKm: 0,
     };
+
+    // ---- Location / distance ----
+    let userLatLng = null;
+    let userMarker = null;
+    function distanceKm(a) {
+      if (!userLatLng) return null;
+      const R = 6371, toRad = d => d * Math.PI / 180;
+      const dLat = toRad(a.lat - userLatLng.lat), dLng = toRad(a.lng - userLatLng.lng);
+      const s = Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(userLatLng.lat)) * Math.cos(toRad(a.lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    }
+    function setUserLocation(lat, lng) {
+      userLatLng = { lat, lng };
+      if (userMarker) userMarker.setLatLng([lat, lng]);
+      else userMarker = L.marker([lat, lng], {
+        icon: L.divIcon({ className: "", html: '<div class="user-dot"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+        zIndexOffset: 1000, interactive: false,
+      }).addTo(map);
+      document.getElementById("radiusWrap").classList.add("show");
+      document.getElementById("locate").classList.add("active");
+      map.setView([lat, lng], 11);
+      render();
+    }
 
     // ---- Render filters ----
     const regionsEl = document.getElementById("regions");
@@ -286,6 +339,21 @@
     document.getElementById("toggle").onclick = () =>
       document.getElementById("sidebar").classList.toggle("open");
 
+    document.getElementById("locate").onclick = () => {
+      if (!navigator.geolocation) { alert("הדפדפן לא תומך באיתור מיקום"); return; }
+      const btn = document.getElementById("locate");
+      btn.textContent = "מאתר…";
+      navigator.geolocation.getCurrentPosition(
+        pos => { btn.textContent = "📍 קרוב אליי"; setUserLocation(pos.coords.latitude, pos.coords.longitude); },
+        () => { btn.textContent = "📍 קרוב אליי"; alert("לא הצלחנו לאתר את המיקום שלך"); },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    };
+    document.getElementById("radius").onchange = e => {
+      state.radiusKm = Number(e.target.value);
+      render();
+    };
+
     // ---- Markers ----
     function markerIcon(region) {
       const color = (REGION_META[region] || DEFAULT_REGION).color;
@@ -299,6 +367,8 @@
     function popupHtml(a) {
       const tags = (a.types || []).slice(0, 4).map(t => `<span class="pop-tag">${esc(t)}</span>`).join("");
       const img = a.image ? `<img class="pop-img" src="${esc(a.image)}" loading="lazy" onerror="this.style.display='none'">` : "";
+      const dkm = distanceKm(a);
+      const dist = dkm != null ? `<p class="pop-dist">📍 ${dkm < 1 ? Math.round(dkm * 1000) + " מ׳" : dkm.toFixed(1) + " ק״מ"} ממך</p>` : "";
       const addr = a.address ? `<p class="pop-addr">📍 ${esc(a.address)}</p>` : "";
       const links = (a.sources || []).map(s =>
         `<a class="pop-link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.label || s.name)} ←</a>`
@@ -311,6 +381,7 @@
       </div>`;
       return `${img}<div class="pop-body">
         <p class="pop-title">${esc(a.title)}</p>
+        ${dist}
         ${addr}
         <div class="pop-tags">${tags}</div>
         ${nav}
@@ -320,7 +391,7 @@
 
     const markers = data.map(a => {
       const m = L.marker([a.lat, a.lng], { icon: markerIcon(a.region) });
-      m.bindPopup(popupHtml(a), { minWidth: 240, maxWidth: 240 });
+      m.bindPopup(() => popupHtml(a), { minWidth: 240, maxWidth: 240 });
       m._data = a;
       return m;
     });
@@ -328,6 +399,7 @@
     function matches(a) {
       if (!state.regions.has(a.region)) return false;
       if (!(a.sources || []).some(s => state.sources.has(s.name))) return false;
+      if (userLatLng && state.radiusKm > 0 && distanceKm(a) > state.radiusKm) return false;
       const ts = a.types || [];
       if (ts.length === 0) { if (state.types.size === 0) return false; }
       else if (!ts.some(t => state.types.has(t))) return false;
