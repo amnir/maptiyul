@@ -114,6 +114,12 @@
     .pop-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
     .pop-link { display: inline-block; font-size: 13px; font-weight: 700; color: var(--accent); text-decoration: none; }
     .pop-link:hover { text-decoration: underline; }
+    .pop-nav { display: flex; gap: 8px; margin: 4px 0 10px; }
+    .nav-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      font-size: 13px; font-weight: 700; text-decoration: none; padding: 8px 6px; border-radius: 9px; color: #fff; }
+    .nav-btn.waze { background: #33ccff; }
+    .nav-btn.gmaps { background: #1f7a8c; }
+    .nav-btn:hover { filter: brightness(.95); }
 
     .marker-dot {
       width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff;
@@ -297,10 +303,17 @@
       const links = (a.sources || []).map(s =>
         `<a class="pop-link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.label || s.name)} ←</a>`
       ).join("");
+      const waze = `https://waze.com/ul?ll=${a.lat},${a.lng}&navigate=yes`;
+      const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${a.lat},${a.lng}`;
+      const nav = `<div class="pop-nav">
+        <a class="nav-btn waze" href="${waze}" target="_blank" rel="noopener">Waze</a>
+        <a class="nav-btn gmaps" href="${gmaps}" target="_blank" rel="noopener">Google Maps</a>
+      </div>`;
       return `${img}<div class="pop-body">
         <p class="pop-title">${esc(a.title)}</p>
         ${addr}
         <div class="pop-tags">${tags}</div>
+        ${nav}
         <div class="pop-links">${links}</div>
       </div>`;
     }
