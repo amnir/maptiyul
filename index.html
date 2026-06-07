@@ -114,6 +114,23 @@
     .user-dot { width: 16px; height: 16px; border-radius: 50%; background: #2f6fd0;
       border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(47,111,208,.3); }
 
+    .listtoggle { width: 100%; margin-top: 8px; padding: 9px; border: 1px solid var(--line);
+      background: #fff; border-radius: 10px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .listtoggle:hover { background: #f4f7f9; }
+    .listtoggle.active { background: var(--accent); color: #fff; border-color: transparent; }
+    .results { display: none; margin-top: 8px; max-height: 320px; overflow-y: auto;
+      border: 1px solid var(--line); border-radius: 10px; }
+    .results.show { display: block; }
+    .result-row { display: flex; align-items: center; gap: 8px; padding: 9px 11px;
+      border-bottom: 1px solid var(--line); cursor: pointer; }
+    .result-row:last-child { border-bottom: none; }
+    .result-row:hover { background: #f4f7f9; }
+    .result-row .rt { font-weight: 600; font-size: 13px; flex: 1; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+    .result-row .rm { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .results .more { padding: 9px 11px; color: var(--muted); font-size: 12px; text-align: center; }
+    .results .empty { padding: 14px; color: var(--muted); font-size: 13px; text-align: center; }
+
     /* Map */
     #map { flex: 1; height: 100%; }
     .leaflet-popup-content { margin: 0; width: 240px !important; }
@@ -189,6 +206,9 @@
             <option value="100">עד 100 ק״מ</option>
           </select>
         </div>
+
+        <button id="listToggle" class="listtoggle">📋 הצג רשימת תוצאות</button>
+        <div id="resultsList" class="results"></div>
 
         <div class="group">
           <h2>אזור</h2>
@@ -284,6 +304,7 @@
       q: "",
       radiusKm: 0,
       favOnly: false,
+      listOpen: false,
     };
 
     // ---- Location / distance ----
@@ -394,6 +415,43 @@
       document.getElementById("favToggle").classList.toggle("active", state.favOnly);
       render();
     };
+    document.getElementById("listToggle").onclick = () => {
+      state.listOpen = !state.listOpen;
+      const btn = document.getElementById("listToggle");
+      btn.classList.toggle("active", state.listOpen);
+      btn.textContent = state.listOpen ? "📋 הסתר רשימה" : "📋 הצג רשימת תוצאות";
+      document.getElementById("resultsList").classList.toggle("show", state.listOpen);
+      renderList();
+    };
+
+    function flyToPlace(a) {
+      const m = markers[a._i];
+      cluster.zoomToShowLayer(m, () => m.openPopup());
+      if (window.matchMedia("(max-width: 720px)").matches)
+        document.getElementById("sidebar").classList.remove("open");
+    }
+    function renderList() {
+      const box = document.getElementById("resultsList");
+      if (!state.listOpen) { box.innerHTML = ""; return; }
+      let shown = markers.filter(m => matches(m._data)).map(m => m._data);
+      shown.sort(userLatLng
+        ? (a, b) => distanceKm(a) - distanceKm(b)
+        : (a, b) => a.title.localeCompare(b.title, "he"));
+      if (!shown.length) { box.innerHTML = '<div class="empty">אין תוצאות לסינון הנוכחי</div>'; return; }
+      const CAP = 300;
+      const rows = shown.slice(0, CAP).map(a => {
+        const d = distanceKm(a);
+        const meta = d != null
+          ? (d < 1 ? Math.round(d * 1000) + " מ׳" : d.toFixed(1) + " ק״מ")
+          : (a.types && a.types[0] ? a.types[0] : a.region || "");
+        return `<div class="result-row" data-i="${a._i}">
+          <span class="rt">${esc(a.title)}</span><span class="rm">${esc(meta)}</span></div>`;
+      }).join("");
+      const more = shown.length > CAP ? `<div class="more">ועוד ${shown.length - CAP} תוצאות…</div>` : "";
+      box.innerHTML = rows + more;
+      box.querySelectorAll(".result-row").forEach(el =>
+        el.onclick = () => flyToPlace(data[Number(el.dataset.i)]));
+    }
 
     // ---- Markers ----
     function markerIcon(region) {
@@ -460,6 +518,7 @@
       const shown = markers.filter(m => matches(m._data));
       cluster.addLayers(shown);
       document.getElementById("count").textContent = shown.length.toLocaleString("he-IL");
+      renderList();
       updateHash();
     }
 
