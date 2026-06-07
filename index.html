@@ -177,6 +177,7 @@
         <div class="quickbar">
           <button id="locate" class="qbtn">📍 קרוב אליי</button>
           <button id="favToggle" class="qbtn">☆ מועדפים (<span id="favCount">0</span>)</button>
+          <button id="share" class="qbtn">🔗 שיתוף</button>
         </div>
         <div id="radiusWrap" class="radiuswrap">
           <span>מרחק:</span>
@@ -310,6 +311,7 @@
     }
 
     // ---- Render filters ----
+    const regionPills = {};
     const regionsEl = document.getElementById("regions");
     regions.forEach(r => {
       const meta = REGION_META[r] || DEFAULT_REGION;
@@ -321,9 +323,11 @@
         else { state.regions.add(r); el.classList.add("active"); }
         render();
       };
+      regionPills[r] = el;
       regionsEl.appendChild(el);
     });
 
+    const sourcePills = {};
     const sourcesEl = document.getElementById("sources");
     sources.forEach(name => {
       const el = document.createElement("button");
@@ -334,6 +338,7 @@
         else { state.sources.add(name); el.classList.add("active"); }
         render();
       };
+      sourcePills[name] = el;
       sourcesEl.appendChild(el);
     });
     if (sources.length < 2) document.getElementById("sourceGroup").style.display = "none";
@@ -455,11 +460,73 @@
       const shown = markers.filter(m => matches(m._data));
       cluster.addLayers(shown);
       document.getElementById("count").textContent = shown.length.toLocaleString("he-IL");
+      updateHash();
     }
 
+    // ---- Shareable state in the URL hash ----
+    // Facets default to "all selected"; we store the OFF indices, which is short.
+    let hashReady = false;
+    function offIndices(allArr, set) {
+      return allArr.map((v, i) => set.has(v) ? -1 : i).filter(i => i >= 0).join(".");
+    }
+    function updateHash() {
+      if (!hashReady) return;
+      const p = new URLSearchParams();
+      if (state.q) p.set("q", state.q);
+      const ro = offIndices(regions, state.regions); if (ro) p.set("ro", ro);
+      const so = offIndices(sources, state.sources); if (so) p.set("so", so);
+      const to = offIndices(allTypes, state.types); if (to) p.set("to", to);
+      if (state.favOnly) p.set("fav", "1");
+      if (state.radiusKm) p.set("rad", state.radiusKm);
+      const c = map.getCenter();
+      p.set("v", `${map.getZoom()}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`);
+      history.replaceState(null, "", "#" + p.toString());
+    }
+    function applyOff(str, allArr, set, onOff) {
+      if (str == null) return;
+      const off = new Set(str.split(".").filter(s => s !== "").map(Number));
+      allArr.forEach((v, i) => { if (off.has(i)) { set.delete(v); onOff(v); } });
+    }
+    function applyHash() {
+      const h = location.hash.replace(/^#/, "");
+      if (!h) return false;
+      const p = new URLSearchParams(h);
+      if (p.has("q")) {
+        state.q = p.get("q").toLowerCase();
+        document.getElementById("search").value = p.get("q");
+      }
+      applyOff(p.get("ro"), regions, state.regions, r => regionPills[r] && regionPills[r].classList.remove("active"));
+      applyOff(p.get("so"), sources, state.sources, n => sourcePills[n] && sourcePills[n].classList.remove("active"));
+      applyOff(p.get("to"), allTypes, state.types, t => { if (typeInputs[t]) typeInputs[t].checked = false; });
+      if (p.get("fav") === "1") {
+        state.favOnly = true;
+        document.getElementById("favToggle").classList.add("active");
+      }
+      if (p.has("rad")) {
+        state.radiusKm = Number(p.get("rad"));
+        document.getElementById("radius").value = p.get("rad");
+      }
+      const v = p.get("v");
+      if (v) {
+        const [z, lat, lng] = v.split("/").map(Number);
+        if (!isNaN(z) && !isNaN(lat) && !isNaN(lng)) { map.setView([lat, lng], z); return true; }
+      }
+      return false;
+    }
+
+    document.getElementById("share").onclick = async () => {
+      const btn = document.getElementById("share");
+      try { await navigator.clipboard.writeText(location.href); btn.textContent = "✓ הקישור הועתק"; }
+      catch (e) { btn.textContent = "העתק מהכתובת ↑"; }
+      setTimeout(() => { btn.textContent = "🔗 שיתוף"; }, 1800);
+    };
+
     updateFavCount();
+    const hadView = applyHash();
+    hashReady = true;
     render();
-    if (markers.length) {
+    map.on("moveend", updateHash);
+    if (markers.length && !hadView) {
       try { map.fitBounds(L.latLngBounds(data.map(a => [a.lat, a.lng])).pad(0.05)); } catch (e) {}
     }
   </script>
