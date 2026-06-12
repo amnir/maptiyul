@@ -254,6 +254,18 @@ def main():
     else:
         print("OSM enrichment: data/enrichment/osm_pois.json not found (run enrich/osm.py) — skipped")
 
+    wiki_fp = os.path.join(ENRICH_DIR, "wikipedia.json")
+    if os.path.exists(wiki_fp):
+        wiki = json.load(open(wiki_fp, encoding="utf-8"))
+        n_wiki = 0
+        for p in merged:
+            w = wiki.get(p["title"])
+            if w and w.get("extract") and not p.get("description"):
+                p["description"] = w["extract"]
+                p["wikipedia"] = w.get("url")
+                n_wiki += 1
+        print(f"Wikipedia enrichment: {n_wiki} descriptions added")
+
     # Derived accessibility flag: OSM wheelchair tag or a נגיש keyword/type.
     n_acc = 0
     for p in merged:
