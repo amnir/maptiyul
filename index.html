@@ -24,6 +24,10 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@300..800&display=swap" />
+
   <style>
     :root {
       --bg: #0f1720;
@@ -104,7 +108,8 @@
     .quickbar { display: flex; gap: 8px; margin-top: 10px; }
     .qbtn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
       padding: 9px; border: 1px solid var(--line); background: #fff; border-radius: 10px;
-      font-size: 13px; font-family: inherit; cursor: pointer; transition: .12s; }
+      font-size: 13px; font-family: inherit; cursor: pointer; transition: .12s;
+      white-space: nowrap; min-width: 0; }
     .qbtn:hover { background: #f4f7f9; }
     .qbtn.active { background: var(--accent); color: #fff; border-color: transparent; }
     .radiuswrap { display: none; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--muted); }
