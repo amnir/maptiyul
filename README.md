@@ -70,12 +70,18 @@ up the new source filter automatically.
 
 ### Notes
 
-- **familytrips** pages carry no coordinates (each embeds a Google map keyed by the
-  place *name*), so `3_geocode.py` geocodes names via the free Nominatim service
-  (no API key) at ~1 req/sec — ~25–35 min, resumable via `data/geocode_cache.json`.
-  It tries several query variants (HTML-unescaped, trimmed at the first dash,
-  leading descriptors like "גן לאומי" stripped, Plus-Code locality) and keeps the
-  first hit inside Israel. A minority of obscure spots can't be resolved and are dropped.
+- **familytrips** pages carry no coordinates, but most embed a Google Plus Code
+  (e.g. `WX8H+V4 מודיעין מכבים רעות`), which `3_geocode.py` decodes to the exact
+  spot (via the vendored `scrape/openlocationcode.py`): full codes directly, short
+  codes recovered against the locality, looked up with Nominatim's structured
+  settlement search (bounded to the Israel bbox rather than `countrycodes=il`, so
+  West Bank localities resolve; transliterated names retried with apostrophes
+  stripped). Posts without a plus code fall back to free-text name geocoding with
+  several query variants (HTML-unescaped, trimmed at the first dash, leading
+  descriptors like "גן לאומי" stripped), keeping the first hit inside Israel —
+  these may land on a town centre. Nominatim is free (no API key) at ~1 req/sec,
+  resumable via `data/geocode_cache.json`. A minority of obscure spots can't be
+  resolved and are dropped.
 - **coffeetrail** listings expose exact coordinates + address in a `LocalBusiness`
   schema, so no geocoding is needed.
 - **De-dup** (`build.py`) only merges across *different* sources, and requires both

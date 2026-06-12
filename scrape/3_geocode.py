@@ -251,6 +251,8 @@ def main():
                     cache[key] = place
                     requests_made += 1
                     time.sleep(1.1)
+                    if requests_made % 50 == 0:
+                        save_cache(cache)
                 ref = place or geo
             exact = decode_plus_code(code, ref)
             if exact:
