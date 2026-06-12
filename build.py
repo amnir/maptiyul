@@ -13,6 +13,7 @@ import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RAW_DIR = os.path.join(HERE, "data", "raw")
+ENRICH_DIR = os.path.join(HERE, "data", "enrichment")
 OUT_JSON = os.path.join(HERE, "data", "attractions.json")
 OUT_JS = os.path.join(HERE, "data", "attractions.js")
 
@@ -165,6 +166,66 @@ def merge_group(members):
     }
 
 
+# ---------- enrichment ----------
+def grid_key(lat, lng, cell=0.005):  # ~500m cells
+    return (round(lat / cell), round(lng / cell))
+
+
+def load_osm_index():
+    """Bucket OSM POIs (from enrich/osm.py) by a ~500m grid for fast lookup."""
+    fp = os.path.join(ENRICH_DIR, "osm_pois.json")
+    if not os.path.exists(fp):
+        return None
+    index = {}
+    for poi in json.load(open(fp, encoding="utf-8")):
+        index.setdefault(grid_key(poi["lat"], poi["lng"]), []).append(poi)
+    return index
+
+
+# The stronger the name match, the farther we trust it: familytrips coords are
+# geocoded town centroids, often ~1km off the actual site. A wrong match shows
+# another business's phone and hours, so each tier stays conservative.
+OSM_TIERS = [(0.85, 3000), (0.7, 800), (0.6, 300), (0.45, 80)]
+
+
+def enrich_from_osm(place, index):
+    """Copy hours/phone/website/wheelchair/fee from the best-matching OSM POI,
+    and snap geocoded places to the POI's exact coordinates on a strong match."""
+    gx, gy = grid_key(place["lat"], place["lng"])
+    span = 7  # 7 cells ≈ 3.5km, covers the widest tier
+    best, best_score, best_sim, best_d = None, 0.0, 0.0, 0.0
+    for dx in range(-span, span + 1):
+        for dy in range(-span, span + 1):
+            for poi in index.get((gx + dx, gy + dy), []):
+                d = haversine_m((place["lat"], place["lng"]), (poi["lat"], poi["lng"]))
+                sim = max(name_match(place["title"], n) for n in poi["names"])
+                if not any(sim >= s and d <= dist for s, dist in OSM_TIERS):
+                    continue
+                score = sim - d / 10000  # prefer closer on equal name similarity
+                if score > best_score:
+                    best, best_score, best_sim, best_d = poi, score, sim, d
+    if not best:
+        return False
+    # Strong name match + no source-provided address ⇒ the OSM coordinate is
+    # better than our geocoded centroid.
+    if best_sim >= 0.85 and not place.get("address") and best_d > 50:
+        place["lat"], place["lng"] = best["lat"], best["lng"]
+    t = best["tags"]
+    fields = {
+        "hours": t.get("opening_hours"),
+        "phone": t.get("phone") or t.get("contact:phone"),
+        "website": t.get("website") or t.get("contact:website"),
+        "wheelchair": t.get("wheelchair"),
+        "fee": t.get("fee"),
+    }
+    added = False
+    for k, v in fields.items():
+        if v and not place.get(k):
+            place[k] = v
+            added = True
+    return added
+
+
 def main():
     files = sorted(glob.glob(os.path.join(RAW_DIR, "*.json")))
     records = []
@@ -185,6 +246,22 @@ def main():
     multi = sum(1 for g in groups if len({(m['source']) for m in g}) > 1)
     print(f"After de-dup: {len(merged)} places "
           f"({len(records) - len(merged)} merged away, {multi} span multiple sources)")
+
+    osm_index = load_osm_index()
+    if osm_index:
+        enriched = sum(1 for p in merged if enrich_from_osm(p, osm_index))
+        print(f"OSM enrichment: {enriched} places gained hours/phone/website/wheelchair/fee")
+    else:
+        print("OSM enrichment: data/enrichment/osm_pois.json not found (run enrich/osm.py) — skipped")
+
+    # Derived accessibility flag: OSM wheelchair tag or a נגיש keyword/type.
+    n_acc = 0
+    for p in merged:
+        if p.get("wheelchair") in ("yes", "limited") or \
+           any("נגיש" in k for k in p.get("keywords", []) + p.get("types", [])):
+            p["accessible"] = True
+            n_acc += 1
+    print(f"Accessibility: {n_acc} places flagged accessible")
 
     merged.sort(key=lambda x: x["title"])
     with open(OUT_JSON, "w", encoding="utf-8") as f:
