@@ -20,6 +20,7 @@ OUT_JS = os.path.join(HERE, "data", "attractions.js")
 SOURCE_LABELS = {
     "familytrips": "בשביל המשפחה",
     "coffeetrail": "Coffee Trail",
+    "parks": "רשות הטבע והגנים",
 }
 COFFEE_TYPE = "עגלות קפה ופוד טראק"
 
@@ -85,6 +86,12 @@ def same_place(r1, r2):
     sim = name_match(r1["title"], r2["title"])
     if d <= 200 and sim >= 0.55:
         return True                      # co-located + similar name
+    # Identical names (not mere containment) survive sloppy geocoding: one
+    # source pins the entrance, the other the town centroid. Coffee carts are
+    # excluded — prefix stripping makes branches of one brand look identical.
+    no_coffee = COFFEE_TYPE not in r1["types"] and COFFEE_TYPE not in r2["types"]
+    if d <= 2500 and no_coffee and norm_name(r1["title"]) == norm_name(r2["title"]):
+        return True
     both_coffee = COFFEE_TYPE in r1["types"] and COFFEE_TYPE in r2["types"]
     if both_coffee and d <= 600 and sim >= 0.75:
         return True                      # same cart, loose geocoding (not a different branch)
@@ -152,7 +159,15 @@ def merge_group(members):
         description = description or m.get("description")
         region = region or m.get("region")
 
+    extras = {}
+    for k in ("hours", "phone", "website", "fee"):
+        for m in members:
+            if m.get(k):
+                extras[k] = m[k]
+                break
+
     return {
+        **extras,
         "title": primary["title"],
         "lat": primary["lat"],
         "lng": primary["lng"],
