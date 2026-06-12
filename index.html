@@ -410,13 +410,28 @@
 
     document.getElementById("locate").onclick = () => {
       if (!navigator.geolocation) { alert("הדפדפן לא תומך באיתור מיקום"); return; }
+      if (!window.isSecureContext) {
+        alert("איתור מיקום עובד רק בחיבור מאובטח (https). נסו לפתוח את האתר בכתובת https.");
+        return;
+      }
       const btn = document.getElementById("locate");
+      if (btn.disabled) return;
+      btn.disabled = true;
       btn.textContent = "מאתר…";
-      navigator.geolocation.getCurrentPosition(
-        pos => { btn.textContent = "📍 קרוב אליי"; setUserLocation(pos.coords.latitude, pos.coords.longitude); },
-        () => { btn.textContent = "📍 קרוב אליי"; alert("לא הצלחנו לאתר את המיקום שלך"); },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
+      const deniedMsg = "הגישה למיקום נחסמה. באייפון: הגדרות > פרטיות > שירותי מיקום > Safari, ולאפשר מיקום לאתר דרך תפריט aA בשורת הכתובת.";
+      const done = () => { btn.disabled = false; btn.textContent = "📍 קרוב אליי"; };
+      const onSuccess = pos => { done(); setUserLocation(pos.coords.latitude, pos.coords.longitude); };
+      const onError = err => {
+        if (err.code === err.PERMISSION_DENIED) { done(); alert(deniedMsg); return; }
+        // High accuracy (GPS) often times out indoors — retry once with low accuracy
+        navigator.geolocation.getCurrentPosition(onSuccess, err2 => {
+          done();
+          alert(err2.code === err2.PERMISSION_DENIED ? deniedMsg
+            : "לא הצלחנו לאתר את המיקום שלך. ודאו ששירותי המיקום פעילים ונסו שוב.");
+        }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
+      };
+      navigator.geolocation.getCurrentPosition(onSuccess, onError,
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
     };
     document.getElementById("radius").onchange = e => {
       state.radiusKm = Number(e.target.value);
