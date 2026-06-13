@@ -100,11 +100,11 @@ def coords(html_text, node):
 
 
 def clean_title(html_text, node):
-    if node and node.get("name"):
-        return html.unescape(node["name"]).strip()
-    # og:title is "<name> - <region> - למטייל בישראל (טיולי)" / "<name> - רכישת כרטיסים…".
-    title = meta(html_text, "og:title") or ""
-    return re.split(r"\s+[-|]\s+", title.strip())[0].strip()
+    # Prefer the ld+json name (tracks/POIs); fall back to og:title. Both can carry
+    # a " - <region/subtitle>" tail ("<name> - רמת הגולן - למטייל בישראל (טיולי)",
+    # "הכותל המערבי - המדריך למתפלל ולמטייל"), so trim at the first " - "/"|" either way.
+    raw = (node or {}).get("name") or meta(html_text, "og:title") or ""
+    return re.split(r"\s+[-|]\s+", html.unescape(raw).strip())[0].strip()
 
 
 def scrape(category, url):
