@@ -74,6 +74,17 @@
       border-radius: 10px; font-size: 14px; font-family: inherit; outline: none;
     }
     .search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31,122,140,.12); }
+    .typesearch { margin-top: 8px; font-size: 13px; padding: 8px 11px; }
+
+    .resetall { width: 100%; margin-top: 10px; padding: 9px; border: 1px solid var(--line);
+      background: #fff; border-radius: 10px; font-family: inherit; font-size: 13px; cursor: pointer; color: var(--muted); }
+    .resetall:hover { background: #f4f7f9; }
+
+    .typemode { display: flex; gap: 6px; margin-top: 8px; }
+    .tmbtn { flex: 1; padding: 7px; border: 1px solid var(--line); background: #fff; border-radius: 9px;
+      font-family: inherit; font-size: 12px; cursor: pointer; color: var(--muted); transition: .12s; }
+    .tmbtn.active { background: var(--accent); color: #fff; border-color: transparent; }
+    .type-row.hide { display: none; }
 
     .group { margin-top: 18px; }
     .group h2 {
@@ -222,6 +233,8 @@
         <button id="listToggle" class="listtoggle">📋 הצג רשימת תוצאות</button>
         <div id="resultsList" class="results"></div>
 
+        <button id="resetAll" class="resetall">↺ אפס את כל הסינונים</button>
+
         <div class="group">
           <h2>אזור</h2>
           <div class="pills" id="regions"></div>
@@ -237,6 +250,11 @@
           <div class="row-actions">
             <button class="btn" id="allTypes">הכל</button>
             <button class="btn" id="noTypes">נקה</button>
+          </div>
+          <input id="typeSearch" class="search typesearch" type="search" placeholder="סינון רשימת הסוגים…" />
+          <div class="typemode">
+            <button class="tmbtn active" data-mode="or">לפחות אחד</button>
+            <button class="tmbtn" data-mode="and">כל הסוגים שנבחרו</button>
           </div>
           <div class="types" id="types" style="margin-top:8px"></div>
         </div>
@@ -327,6 +345,7 @@
       radiusKm: 0,
       favOnly: false,
       listOpen: false,
+      typeMode: "or",
     };
 
     // ---- Location / distance ----
@@ -388,18 +407,51 @@
 
     const typesEl = document.getElementById("types");
     const typeInputs = {};
+    const typeRows = {};
     allTypes.forEach(t => {
       const row = document.createElement("label");
       row.className = "type-row";
       row.innerHTML = `<input type="checkbox" checked /><span>${t}</span><span class="c">${typeCounts[t]}</span>`;
       const cb = row.querySelector("input");
       typeInputs[t] = cb;
+      typeRows[t] = row;
       cb.onchange = () => {
         if (cb.checked) state.types.add(t); else state.types.delete(t);
         render();
       };
       typesEl.appendChild(row);
     });
+
+    // Narrow the (long) type list without touching which types are selected.
+    document.getElementById("typeSearch").addEventListener("input", e => {
+      const q = e.target.value.trim().toLowerCase();
+      allTypes.forEach(t => typeRows[t].classList.toggle("hide", q && !t.toLowerCase().includes(q)));
+    });
+
+    document.querySelectorAll(".tmbtn").forEach(b => b.onclick = () => {
+      state.typeMode = b.dataset.mode;
+      document.querySelectorAll(".tmbtn").forEach(x => x.classList.toggle("active", x === b));
+      render();
+    });
+
+    document.getElementById("resetAll").onclick = () => {
+      state.regions = new Set(regions);
+      state.sources = new Set(sources);
+      state.types = new Set(allTypes);
+      state.q = "";
+      state.radiusKm = 0;
+      state.favOnly = false;
+      state.typeMode = "or";
+      document.getElementById("search").value = "";
+      document.getElementById("typeSearch").value = "";
+      allTypes.forEach(t => { typeInputs[t].checked = true; typeRows[t].classList.remove("hide"); });
+      Object.values(regionPills).forEach(el => el.classList.add("active"));
+      Object.values(sourcePills).forEach(el => el.classList.add("active"));
+      document.querySelectorAll(".tmbtn").forEach(x => x.classList.toggle("active", x.dataset.mode === "or"));
+      document.getElementById("radius").value = "0";
+      document.getElementById("favToggle").classList.remove("active");
+      render();
+    };
 
     document.getElementById("search").addEventListener("input", e => {
       state.q = e.target.value.trim().toLowerCase();
@@ -541,8 +593,13 @@
       if (userLatLng && state.radiusKm > 0 && distanceKm(a) > state.radiusKm) return false;
       if (state.favOnly && !favorites.has(a.id)) return false;
       const ts = a.types || [];
-      if (ts.length === 0) { if (state.types.size === 0) return false; }
-      else if (!ts.some(t => state.types.has(t))) return false;
+      if (ts.length === 0) {
+        if (state.types.size === 0) return false;
+      } else if (state.typeMode === "and") {
+        // place must carry every selected type (intersection filter)
+        if (state.types.size === 0) return false;
+        for (const t of state.types) if (!ts.includes(t)) return false;
+      } else if (!ts.some(t => state.types.has(t))) return false;
       if (state.q) {
         const hay = (a.title + " " + (a.address || "") + " " + (a.keywords || []).join(" ") + " " + ts.join(" ")).toLowerCase();
         if (!hay.includes(state.q)) return false;
@@ -573,6 +630,7 @@
       const so = offIndices(sources, state.sources); if (so) p.set("so", so);
       const to = offIndices(allTypes, state.types); if (to) p.set("to", to);
       if (state.favOnly) p.set("fav", "1");
+      if (state.typeMode === "and") p.set("tm", "and");
       if (state.radiusKm) p.set("rad", state.radiusKm);
       const c = map.getCenter();
       p.set("v", `${map.getZoom()}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`);
@@ -597,6 +655,10 @@
       if (p.get("fav") === "1") {
         state.favOnly = true;
         document.getElementById("favToggle").classList.add("active");
+      }
+      if (p.get("tm") === "and") {
+        state.typeMode = "and";
+        document.querySelectorAll(".tmbtn").forEach(x => x.classList.toggle("active", x.dataset.mode === "and"));
       }
       if (p.has("rad")) {
         state.radiusKm = Number(p.get("rad"));
