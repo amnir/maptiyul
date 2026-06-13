@@ -16,41 +16,60 @@
   <meta property="og:locale" content="he_IL" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="theme-color" content="#1f7a8c" />
-  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;📍&lt;/text&gt;&lt;/svg&gt;" />
-  <link rel="apple-touch-icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;📍&lt;/text&gt;&lt;/svg&gt;" />
+  <link rel="icon" type="image/png" href="icons/icon-192.png" />
+
+  <!-- PWA / add-to-home-screen -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="MapTiyul" />
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Assistant:wght@300..800&display=swap" />
+
   <style>
     :root {
       --bg: #0f1720;
       --panel: #ffffff;
-      --ink: #1b2430;
+      --ink: #15212e;
       --muted: #5b6b7b;
-      --line: #e6ebf0;
+      --line: rgba(20,40,60,.10);
       --accent: #1f7a8c;
       --r-north: #2e9e5b;
       --r-center: #2f6fd0;
       --r-jlem: #8b5cf6;
       --r-south: #e08a1e;
-      --shadow: 0 6px 24px rgba(15,23,32,.12);
+      --shadow: 0 10px 40px rgba(15,40,60,.18);
+      --glass: rgba(255,255,255,.60);
+      --glass-strong: rgba(255,255,255,.80);
+      --glass-border: rgba(255,255,255,.55);
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
     body {
-      font-family: "Heebo", "Segoe UI", system-ui, Arial, sans-serif;
+      font-family: "Assistant", "Heebo", "Segoe UI", system-ui, Arial, sans-serif;
       color: var(--ink); background: #eef2f5;
     }
-    #app { display: flex; height: 100vh; overflow: hidden; }
+    #app { position: relative; height: 100vh; height: 100dvh; overflow: hidden; }
 
-    /* Sidebar */
+    /* Sidebar — floating frosted-glass panel */
     #sidebar {
-      width: 340px; flex: 0 0 340px; height: 100%;
-      background: var(--panel); box-shadow: var(--shadow);
-      display: flex; flex-direction: column; z-index: 1000;
+      position: absolute; top: 14px; right: 14px; z-index: 1000;
+      width: 358px; max-height: calc(100dvh - 28px);
+      background: var(--glass);
+      -webkit-backdrop-filter: blur(20px) saturate(150%);
+      backdrop-filter: blur(20px) saturate(150%);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px; box-shadow: var(--shadow);
+      display: flex; flex-direction: column; overflow: hidden;
     }
     .side-head { padding: 18px 18px 12px; border-bottom: 1px solid var(--line); }
     .side-head h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.02em; direction: ltr; text-align: right; }
@@ -61,6 +80,7 @@
     .search {
       width: 100%; padding: 10px 12px; border: 1px solid var(--line);
       border-radius: 10px; font-size: 14px; font-family: inherit; outline: none;
+      background: var(--glass-strong);
     }
     .search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31,122,140,.12); }
 
@@ -71,7 +91,7 @@
     }
     .pills { display: flex; flex-wrap: wrap; gap: 6px; }
     .pill {
-      border: 1px solid var(--line); background: #fff; color: var(--ink);
+      border: 1px solid var(--line); background: var(--glass-strong); color: var(--ink);
       border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer;
       user-select: none; transition: .12s; display: inline-flex; align-items: center; gap: 6px;
     }
@@ -89,42 +109,43 @@
       display: flex; align-items: center; gap: 9px; padding: 7px 6px;
       border-radius: 8px; cursor: pointer; font-size: 14px;
     }
-    .type-row:hover { background: #f4f7f9; }
+    .type-row:hover { background: rgba(255,255,255,.55); }
     .type-row input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
     .type-row .c { color: var(--muted); font-size: 12px; margin-inline-start: auto; }
 
     .row-actions { display: flex; gap: 8px; margin-top: 8px; }
     .btn {
       flex: 1; padding: 8px; border-radius: 9px; border: 1px solid var(--line);
-      background: #fff; cursor: pointer; font-size: 13px; font-family: inherit;
+      background: var(--glass-strong); cursor: pointer; font-size: 13px; font-family: inherit;
     }
-    .btn:hover { background: #f4f7f9; }
+    .btn:hover { background: #fff; }
     .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
 
     .quickbar { display: flex; gap: 8px; margin-top: 10px; }
     .qbtn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-      padding: 9px; border: 1px solid var(--line); background: #fff; border-radius: 10px;
-      font-size: 13px; font-family: inherit; cursor: pointer; transition: .12s; }
-    .qbtn:hover { background: #f4f7f9; }
+      padding: 9px; border: 1px solid var(--line); background: var(--glass-strong); border-radius: 10px;
+      font-size: 13px; font-family: inherit; cursor: pointer; transition: .12s;
+      white-space: nowrap; min-width: 0; }
+    .qbtn:hover { background: #fff; }
     .qbtn.active { background: var(--accent); color: #fff; border-color: transparent; }
     .radiuswrap { display: none; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--muted); }
     .radiuswrap.show { display: flex; }
     .radiuswrap select { flex: 1; padding: 7px; border: 1px solid var(--line); border-radius: 9px;
-      font-family: inherit; font-size: 13px; }
+      font-family: inherit; font-size: 13px; background: var(--glass-strong); }
     .user-dot { width: 16px; height: 16px; border-radius: 50%; background: #2f6fd0;
       border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(47,111,208,.3); }
 
     .listtoggle { width: 100%; margin-top: 8px; padding: 9px; border: 1px solid var(--line);
-      background: #fff; border-radius: 10px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
-    .listtoggle:hover { background: #f4f7f9; }
+      background: var(--glass-strong); border-radius: 10px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+    .listtoggle:hover { background: #fff; }
     .listtoggle.active { background: var(--accent); color: #fff; border-color: transparent; }
     .results { display: none; margin-top: 8px; max-height: 320px; overflow-y: auto;
-      border: 1px solid var(--line); border-radius: 10px; }
+      border: 1px solid var(--line); border-radius: 10px; background: var(--glass-strong); }
     .results.show { display: block; }
     .result-row { display: flex; align-items: center; gap: 8px; padding: 9px 11px;
       border-bottom: 1px solid var(--line); cursor: pointer; }
     .result-row:last-child { border-bottom: none; }
-    .result-row:hover { background: #f4f7f9; }
+    .result-row:hover { background: rgba(255,255,255,.6); }
     .result-row .rt { font-weight: 600; font-size: 13px; flex: 1; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; }
     .result-row .rm { color: var(--muted); font-size: 12px; white-space: nowrap; }
@@ -132,7 +153,7 @@
     .results .empty { padding: 14px; color: var(--muted); font-size: 13px; text-align: center; }
 
     /* Map */
-    #map { flex: 1; height: 100%; }
+    #map { position: absolute; inset: 0; z-index: 0; }
     .leaflet-popup-content { margin: 0; width: 240px !important; }
     .pop-img { width: 100%; height: 130px; object-fit: cover; display: block;
       border-radius: 8px 8px 0 0; background: #dde4ea; }
@@ -172,14 +193,20 @@
     #toggle { display: none; }
     @media (max-width: 720px) {
       #sidebar {
-        position: absolute; inset: 0 0 auto 0; width: 100%; flex: none;
-        max-height: 70vh; transform: translateY(-100%); transition: transform .25s;
-        border-radius: 0 0 16px 16px;
+        top: 10px; right: 10px; left: 10px; width: auto;
+        max-height: calc(100dvh - 20px);
+        transform: translateY(calc(-100% - 14px)); transition: transform .25s;
       }
       #sidebar.open { transform: translateY(0); }
+      .side-head { padding-inline-start: 104px; }
       #toggle {
-        display: flex; position: absolute; top: 12px; right: 12px; z-index: 1100;
-        background: var(--accent); color: #fff; border: none; border-radius: 10px;
+        display: flex; position: absolute; top: 14px; right: 14px; z-index: 1100;
+        align-items: center; gap: 6px;
+        background: var(--glass-strong);
+        -webkit-backdrop-filter: blur(18px) saturate(150%);
+        backdrop-filter: blur(18px) saturate(150%);
+        color: var(--accent); font-weight: 700;
+        border: 1px solid var(--glass-border); border-radius: 12px;
         padding: 10px 14px; font-size: 14px; font-family: inherit; box-shadow: var(--shadow); cursor: pointer;
       }
     }
@@ -406,13 +433,28 @@
 
     document.getElementById("locate").onclick = () => {
       if (!navigator.geolocation) { alert("הדפדפן לא תומך באיתור מיקום"); return; }
+      if (!window.isSecureContext) {
+        alert("איתור מיקום עובד רק בחיבור מאובטח (https). נסו לפתוח את האתר בכתובת https.");
+        return;
+      }
       const btn = document.getElementById("locate");
+      if (btn.disabled) return;
+      btn.disabled = true;
       btn.textContent = "מאתר…";
-      navigator.geolocation.getCurrentPosition(
-        pos => { btn.textContent = "📍 קרוב אליי"; setUserLocation(pos.coords.latitude, pos.coords.longitude); },
-        () => { btn.textContent = "📍 קרוב אליי"; alert("לא הצלחנו לאתר את המיקום שלך"); },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
+      const deniedMsg = "הגישה למיקום נחסמה. באייפון: הגדרות > פרטיות > שירותי מיקום > Safari, ולאפשר מיקום לאתר דרך תפריט aA בשורת הכתובת.";
+      const done = () => { btn.disabled = false; btn.textContent = "📍 קרוב אליי"; };
+      const onSuccess = pos => { done(); setUserLocation(pos.coords.latitude, pos.coords.longitude); };
+      const onError = err => {
+        if (err.code === err.PERMISSION_DENIED) { done(); alert(deniedMsg); return; }
+        // High accuracy (GPS) often times out indoors — retry once with low accuracy
+        navigator.geolocation.getCurrentPosition(onSuccess, err2 => {
+          done();
+          alert(err2.code === err2.PERMISSION_DENIED ? deniedMsg
+            : "לא הצלחנו לאתר את המיקום שלך. ודאו ששירותי המיקום פעילים ונסו שוב.");
+        }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 });
+      };
+      navigator.geolocation.getCurrentPosition(onSuccess, onError,
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
     };
     document.getElementById("radius").onchange = e => {
       state.radiusKm = Number(e.target.value);
@@ -652,6 +694,10 @@
     map.on("moveend", updateHash);
     if (markers.length && !hadView) {
       try { map.fitBounds(L.latLngBounds(data.map(a => [a.lat, a.lng])).pad(0.05)); } catch (e) {}
+    }
+
+    if ("serviceWorker" in navigator && location.protocol === "https:") {
+      navigator.serviceWorker.register("sw.js");
     }
   </script>
 </body>

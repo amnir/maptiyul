@@ -12,6 +12,8 @@ import time
 import urllib.parse
 import urllib.request
 
+import openlocationcode as olc
+
 HERE = os.path.dirname(__file__)
 POSTS = os.path.join(HERE, "..", "data", "posts.json")
 CACHE = os.path.join(HERE, "..", "data", "geocode_cache.json")
@@ -54,7 +56,7 @@ PREFIXES = [
     "אתר טבע", "פארק לאומי",
 ]
 # Google Plus Code, optionally followed by a locality name we can geocode instead.
-PLUS_RE = re.compile(r"^[23456789CFGHJMPQRVWX]{2,}\+[23456789CFGHJMPQRVWX]+\s*(.*)$")
+PLUS_RE = re.compile(r"^([23456789CFGHJMPQRVWX]{2,}\+[23456789CFGHJMPQRVWX]+)\s*(.*)$")
 
 
 def clean(s):
@@ -78,8 +80,8 @@ def query_variants(mapq, title):
         if not raw:
             continue
         m = PLUS_RE.match(html.unescape(raw).strip())
-        if m and m.group(1):
-            add(m.group(1))          # locality after the plus code
+        if m and m.group(2):
+            add(m.group(2))          # locality after the plus code
             continue
         if m:
             continue                  # bare plus code, can't geocode by name
@@ -89,6 +91,68 @@ def query_variants(mapq, title):
             if c.startswith(p + " "):
                 add(c[len(p):].strip())
     return out
+
+
+def plus_code_parts(raw):
+    """Return (code, locality) if raw starts with a plus code, else None."""
+    m = PLUS_RE.match(html.unescape(raw or "").strip())
+    if not m:
+        return None
+    return m.group(1), m.group(2).strip(" ,")
+
+
+def geocode_place(locality):
+    """Structured settlement search for a plus-code locality. Free-text search
+    often ranks same-named streets in other cities first, which would recover
+    the short code in the wrong grid cell. No countrycodes filter: West Bank
+    settlements (e.g. Kalia) aren't tagged 'il'; the viewbox bounds instead.
+    Transliterated names only match OSM with apostrophes removed (Yavne'el ->
+    Yavneel), so retry without them."""
+    variants = [locality]
+    stripped = locality.replace("'", "").replace("’", "")
+    if stripped != locality:
+        variants.append(stripped)
+    for n, variant in enumerate(variants):
+        if n:
+            time.sleep(1.1)
+        params = urllib.parse.urlencode({
+            "city": variant,
+            "format": "json",
+            "limit": "3",
+            "viewbox": f"{LON_MIN},{LAT_MAX},{LON_MAX},{LAT_MIN}",
+            "bounded": "1",
+        })
+        url = "https://nominatim.openstreetmap.org/search?" + params
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = json.load(r)
+        for d in data:
+            if d.get("class") not in ("place", "boundary"):
+                continue
+            lat, lon = float(d["lat"]), float(d["lon"])
+            if LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lon <= LON_MAX:
+                return {"lat": lat, "lng": lon, "display": d.get("display_name", "")}
+    return None
+
+
+def decode_plus_code(code, ref):
+    """Exact coordinates from a plus code. Full codes decode directly; short
+    codes (e.g. "WX8H+V4") are recovered against the locality geocode, which
+    only needs to be within ~25km of the true spot."""
+    try:
+        if olc.isFull(code):
+            full = code
+        elif ref and olc.isShort(code):
+            full = olc.recoverNearest(code, ref["lat"], ref["lng"])
+        else:
+            return None
+        area = olc.decode(full)
+    except ValueError:
+        return None
+    lat, lng = area.latitudeCenter, area.longitudeCenter
+    if not (LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lng <= LON_MAX):
+        return None
+    return {"lat": lat, "lng": lng, "display": f"plus code {code}"}
 
 
 def geocode(query):
@@ -168,6 +232,31 @@ def main():
                     print(f"  {i}/{len(candidates)} processed, {requests_made} requests, {len(attractions)} placed, {misses} misses")
             if geo:
                 break
+
+        # A plus code in mapq pins the exact spot; a geocoded locality only
+        # serves as the reference point for recovering short codes.
+        plus = plus_code_parts(p.get("mapq"))
+        if plus:
+            code, locality = plus
+            ref = geo
+            if locality and olc.isShort(code):
+                key = "city:" + locality
+                if key in cache:
+                    place = cache[key]
+                else:
+                    try:
+                        place = geocode_place(locality)
+                    except Exception:
+                        place = None
+                    cache[key] = place
+                    requests_made += 1
+                    time.sleep(1.1)
+                    if requests_made % 50 == 0:
+                        save_cache(cache)
+                ref = place or geo
+            exact = decode_plus_code(code, ref)
+            if exact:
+                geo = exact
 
         if not geo:
             misses += 1
