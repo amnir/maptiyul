@@ -307,9 +307,19 @@
     }
 
     const map = L.map("map", { zoomControl: true }).setView([31.4, 35.0], 8);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19, attribution: "&copy; OpenStreetMap"
-    }).addTo(map);
+    const baseLayers = {
+      "מפה": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19, attribution: "&copy; OpenStreetMap"
+      }),
+      "לוויין": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 19, attribution: "&copy; Esri, Maxar, Earthstar Geographics"
+      }),
+      "טופוגרפי": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+        maxZoom: 17, attribution: "&copy; OpenTopoMap (CC-BY-SA), &copy; OpenStreetMap"
+      }),
+    };
+    baseLayers["מפה"].addTo(map);
+    L.control.layers(baseLayers, null, { position: "topleft" }).addTo(map);
 
     const cluster = L.markerClusterGroup({ maxClusterRadius: 50, spiderfyOnMaxZoom: true });
     map.addLayer(cluster);
