@@ -21,6 +21,7 @@ SOURCE_LABELS = {
     "familytrips": "בשביל המשפחה",
     "coffeetrail": "Coffee Trail",
     "parks": "רשות הטבע והגנים",
+    "tiuli": "טיולי",
 }
 COFFEE_TYPE = "עגלות קפה ופוד טראק"
 

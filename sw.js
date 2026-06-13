@@ -1,6 +1,6 @@
 // Service worker: precache the app shell, serve cached-first for static
 // assets, network-first for the page and data so updates land on reload.
-const CACHE = "maptiyul-v1";
+const CACHE = "maptiyul-v2";
 
 const SHELL = [
   "./",

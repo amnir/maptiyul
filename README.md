@@ -9,6 +9,8 @@ by **region**, and by **source**.
 - [familytrips.co.il](https://familytrips.co.il) — בשביל המשפחה (family trips & attractions)
 - [coffeetrail.co.il](https://coffeetrail.co.il) — Coffee Trail (coffee-cart directory)
 - [parks.org.il](https://www.parks.org.il) — רשות הטבע והגנים (national parks & nature reserves)
+- [tiuli.com](https://www.tiuli.com) — אתר למטייל בישראל / טיולי (attractions, points of
+  interest, camping & nature-walk trails)
 
 Places that appear in more than one source are merged into a single marker that
 links back to every source.
@@ -75,6 +77,9 @@ python3 sources/coffeetrail.py       # -> data/raw/coffeetrail.json
 # parks (reads sources/cache/parks_raw.json — see notes):
 python3 sources/parks.py             # -> data/raw/parks.json
 
+# tiuli (coordinates already in the pages; resumable):
+python3 sources/tiuli.py             # -> data/raw/tiuli.json
+
 # enrichment (optional but recommended; both are resumable):
 python3 enrich/osm.py                # -> data/enrichment/osm_pois.json (one bulk Overpass query)
 python3 enrich/wikipedia.py          # -> data/enrichment/wikipedia.json (~1 req/sec, ~20 min)
@@ -111,6 +116,14 @@ up the new source filter automatically.
   in a browser and saved to `sources/cache/parks_raw.json`; `sources/parks.py` then
   converts its ITM / Israeli TM Grid coordinates (EPSG:2039) to WGS84 and maps the
   site's filter flags to our types.
+- **tiuli** is a Laravel site (not WordPress) behind Cloudflare but reachable with a
+  plain User-Agent. `sources/tiuli.py` walks the one `sitemap.xml`, keeps only real
+  item pages (`/<category>/<id>/<slug>` for attractions, points-of-interest, camping
+  and tracks — region landing pages and the stale 404 entries are skipped), and reads
+  each page's Waze navigation link (`…ll=<lat>,<lng>`) for coordinates — the one source
+  present across every category, so no geocoding. Events (time-bound) and flora/fauna
+  (species pages) are intentionally excluded. The on-page description is templated SEO
+  filler, so it is left blank for Wikipedia enrichment to fill.
 - **OSM enrichment** (`enrich/osm.py`) issues a single bulk Overpass query for named
   POIs across Israel, and `build.py` copies hours/phone/website/wheelchair/fee onto a
   place only on a confident name+distance match (a wrong match would show another
