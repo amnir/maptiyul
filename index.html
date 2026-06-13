@@ -154,35 +154,44 @@
 
     /* Map */
     #map { position: absolute; inset: 0; z-index: 0; }
-    .leaflet-popup-content { margin: 0; width: 240px !important; }
-    .pop-img { width: 100%; height: 130px; object-fit: cover; display: block;
-      border-radius: 8px 8px 0 0; background: #dde4ea; }
-    .pop-body { padding: 10px 12px 12px; }
-    .pop-title { font-weight: 800; font-size: 15px; margin: 0 0 6px; line-height: 1.25; }
-    .pop-addr { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+    .leaflet-popup-content { margin: 0; width: 244px !important; }
+    .leaflet-popup-content-wrapper { border-radius: 16px; box-shadow: 0 12px 36px rgba(15,40,60,.22); padding: 0; overflow: hidden; }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #fff; }
+    .pop-img { width: 100%; height: 132px; object-fit: cover; display: block; background: #dde4ea; }
+    .pop-body { padding: 12px 14px 14px; direction: rtl; text-align: right; }
+    .pop-title { font-weight: 800; font-size: 16px; margin: 0 0 7px; line-height: 1.3;
+      letter-spacing: -.01em; color: var(--ink); direction: rtl; text-align: right; }
+    .pop-addr { font-size: 12px; color: var(--muted); margin: 0 0 6px; display: flex; gap: 5px; align-items: flex-start; }
+    .pop-addr svg, .pop-dist svg { flex-shrink: 0; margin-top: 1px; }
     .pop-desc { font-size: 12px; color: #44535e; margin: 0 0 6px; line-height: 1.45;
       max-height: 88px; overflow: hidden; }
     .pop-meta { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
     .pop-meta a { color: var(--accent); text-decoration: none; }
     .pop-tag.acc { background: #e3f2e8; color: #1d6b3a; font-weight: 700; }
     .pop-weather { font-size: 12px; color: #44535e; margin: 0 0 6px; min-height: 15px; }
-    .pop-dist { font-size: 12px; font-weight: 700; color: var(--accent); margin: 0 0 6px; }
-    .fav-btn { width: 100%; margin: 0 0 8px; padding: 7px; border: 1px solid var(--line);
-      background: #fff; border-radius: 9px; font-family: inherit; font-size: 13px; font-weight: 700;
-      cursor: pointer; color: var(--ink); }
-    .fav-btn:hover { background: #fff7e6; }
+    .pop-dist { font-size: 12.5px; font-weight: 700; color: var(--accent); margin: 0 0 8px; display: flex; gap: 5px; align-items: center; }
+    .fav-btn { width: 100%; margin: 0 0 8px; padding: 9px; border: 1px solid var(--line);
+      background: #fff; border-radius: 11px; font-family: inherit; font-size: 13px; font-weight: 700;
+      cursor: pointer; color: var(--ink); transition: background .12s, border-color .12s, color .12s; }
+    .fav-btn:hover { background: #fff7e6; border-color: #f0d9a0; }
     .fav-btn.on { background: #fff2cc; border-color: #f0c14b; color: #8a6d1a; }
-    .pop-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
-    .pop-tag { font-size: 11px; background: #eef3f5; color: #34566a; padding: 2px 8px; border-radius: 999px; }
-    .pop-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    .pop-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 11px; }
+    .pop-tag { font-size: 11px; background: #eef3f5; color: #34566a; padding: 3px 9px; border-radius: 999px; font-weight: 600; }
+    .pop-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
     .pop-link { display: inline-block; font-size: 13px; font-weight: 700; color: var(--accent); text-decoration: none; }
     .pop-link:hover { text-decoration: underline; }
-    .pop-nav { display: flex; gap: 8px; margin: 4px 0 10px; }
-    .nav-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-      font-size: 13px; font-weight: 700; text-decoration: none; padding: 8px 6px; border-radius: 9px; color: #fff; }
-    .nav-btn.waze { background: #33ccff; }
-    .nav-btn.gmaps { background: #1f7a8c; }
-    .nav-btn:hover { filter: brightness(.95); }
+    .pop-nav { display: flex; gap: 8px; margin: 2px 0 11px; }
+    .nav-btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      font-size: 12.5px; font-weight: 700; white-space: nowrap; text-decoration: none; padding: 10px 6px; border-radius: 12px;
+      background: #fff; border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(15,40,60,.07);
+      transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+    .nav-btn svg { flex-shrink: 0; }
+    .nav-btn:hover { transform: translateY(-1px); box-shadow: 0 5px 14px rgba(15,40,60,.15); }
+    .nav-btn:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(15,40,60,.07); }
+    .nav-btn.waze { color: #0a9ec2; }
+    .nav-btn.waze:hover { border-color: #9fe3f3; }
+    .nav-btn.gmaps { color: #3c4043; }
+    .nav-btn.gmaps:hover { border-color: #c9d6e4; }
 
     .marker-dot {
       width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff;
@@ -528,12 +537,15 @@
       });
     }
     function esc(s) { return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+    const PIN_SVG = '<svg width="12" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2C8.1 2 5 5.1 5 9c0 5 7 13 7 13s7-8 7-13c0-3.9-3.1-7-7-7z" fill="currentColor"/><circle cx="12" cy="9" r="2.5" fill="#fff"/></svg>';
+    const WAZE_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3C7.2 3 3.3 6.2 3.3 10.3c0 1.6.6 3.1 1.7 4.3-.2 1-.7 1.9-1.4 2.6-.4.4-.1 1 .4 1 1.7 0 3.2-.6 4.2-1.5 1.2.4 2.5.5 3.8.5 4.8 0 8.7-3.2 8.7-7.4S16.8 3 12 3z" fill="#33ccff"/><circle cx="9.3" cy="10.1" r="1" fill="#fff"/><circle cx="13.9" cy="10.1" r="1" fill="#fff"/><path d="M8.9 12.6c.7 1 1.9 1.6 3.2 1.6s2.5-.6 3.2-1.6" stroke="#fff" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>';
+    const GMAPS_SVG = '<svg width="16" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16.5 3.4A7 7 0 0 0 5.6 5.2l4.2 3.6 6.7-5.4z" fill="#4285F4"/><path d="M5.6 5.2A7 7 0 0 0 5 9c0 1.6.6 3.1 1.4 4.6l3.4-4.8L5.6 5.2z" fill="#34A853"/><path d="M12 5.9A3.1 3.1 0 0 1 15.1 9c0 .8-.3 1.6-.8 2.2l4-5.2a7 7 0 0 0-1.8-2.6l-6.7 5.4A3.1 3.1 0 0 1 12 5.9z" fill="#FBBC04"/><path d="M12 22s1.8-2.3 3.6-5l-1.3-1.8c-.5.6-1.3 1-2.3 1A3.1 3.1 0 0 1 8.9 13l-2.5-3.4C6 9.5 6 9.8 6 9c0 1.6.6 3.1 1.4 4.6C9.6 17.3 12 22 12 22z" fill="#EA4335"/><circle cx="12" cy="9" r="2.6" fill="#fff"/></svg>';
     function popupHtml(a) {
       const tags = (a.types || []).slice(0, 4).map(t => `<span class="pop-tag">${esc(t)}</span>`).join("");
       const img = a.image ? `<img class="pop-img" src="${esc(a.image)}" loading="lazy" onerror="this.style.display='none'">` : "";
       const dkm = distanceKm(a);
-      const dist = dkm != null ? `<p class="pop-dist">📍 ${dkm < 1 ? Math.round(dkm * 1000) + " מ׳" : dkm.toFixed(1) + " ק״מ"} ממך</p>` : "";
-      const addr = a.address ? `<p class="pop-addr">📍 ${esc(a.address)}</p>` : "";
+      const dist = dkm != null ? `<p class="pop-dist">${PIN_SVG} ${dkm < 1 ? Math.round(dkm * 1000) + " מ׳" : dkm.toFixed(1) + " ק״מ"} ממך</p>` : "";
+      const addr = a.address ? `<p class="pop-addr">${PIN_SVG}<span>${esc(a.address)}</span></p>` : "";
       const desc = a.description ? `<p class="pop-desc">${esc(a.description)}</p>` : "";
       const hours = a.hours ? `<p class="pop-meta">🕒 ${esc(a.hours)}</p>` : "";
       const phone = a.phone ? `<p class="pop-meta">📞 <a href="tel:${esc(a.phone)}">${esc(a.phone)}</a></p>` : "";
@@ -548,8 +560,8 @@
       const waze = `https://waze.com/ul?ll=${a.lat},${a.lng}&navigate=yes`;
       const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${a.lat},${a.lng}`;
       const nav = `<div class="pop-nav">
-        <a class="nav-btn waze" href="${waze}" target="_blank" rel="noopener">Waze</a>
-        <a class="nav-btn gmaps" href="${gmaps}" target="_blank" rel="noopener">Google Maps</a>
+        <a class="nav-btn waze" href="${waze}" target="_blank" rel="noopener">${WAZE_SVG}Waze</a>
+        <a class="nav-btn gmaps" href="${gmaps}" target="_blank" rel="noopener">${GMAPS_SVG}Google Maps</a>
       </div>`;
       const on = favorites.has(a.id);
       const fav = `<button class="fav-btn ${on ? "on" : ""}" onclick="toggleFav(${a._i}, this)">${on ? "★ שמור במועדפים" : "☆ הוסף למועדפים"}</button>`;
