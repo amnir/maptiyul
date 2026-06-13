@@ -13,5 +13,6 @@ python3 build.py              # regenerate data/attractions.{json,js} after data
 ## Gotchas
 
 - **`data/attractions.{js,json}` are generated** — never hand-edit; change a scraper or `data/raw/*.json` and run `build.py`.
-- **Deploy = push to `main`** → GitHub Pages at https://amnir.github.io/maptiyul/ (absolute OG/`og:url` point there).
+- **Deploy = merge to `main`** → GitHub Pages at https://amnir.github.io/maptiyul/ (absolute OG/`og:url` point there). `main` is protected: push a branch + open a PR (`gh pr create`), direct pushes are rejected.
+- **RTL layout** (`dir="rtl"`): logical CSS props are mirrored — `inline-start` = right, `inline-end` = left.
 - **`sw.js` cache** `maptiyul-v1`: page + `attractions.js` are network-first; bump the cache name when changing which shell assets are precached.
