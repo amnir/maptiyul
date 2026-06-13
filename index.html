@@ -84,6 +84,8 @@
     .tmbtn { flex: 1; padding: 7px; border: 1px solid var(--line); background: #fff; border-radius: 9px;
       font-family: inherit; font-size: 12px; cursor: pointer; color: var(--muted); transition: .12s; }
     .tmbtn.active { background: var(--accent); color: #fff; border-color: transparent; }
+    .typehint { display: none; margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.45; }
+    .typehint.show { display: block; }
     .type-row.hide { display: none; }
 
     .group { margin-top: 18px; }
@@ -256,6 +258,7 @@
             <button class="tmbtn active" data-mode="or">לפחות אחד</button>
             <button class="tmbtn" data-mode="and">כל הסוגים שנבחרו</button>
           </div>
+          <div class="typehint" id="typeHint">טיפ: סמנו רק כמה סוגים (למשל מעיינות + טיולי מים) כדי לראות מקומות שמשלבים את כולם.</div>
           <div class="types" id="types" style="margin-top:8px"></div>
         </div>
       </div>
@@ -431,6 +434,7 @@
     document.querySelectorAll(".tmbtn").forEach(b => b.onclick = () => {
       state.typeMode = b.dataset.mode;
       document.querySelectorAll(".tmbtn").forEach(x => x.classList.toggle("active", x === b));
+      document.getElementById("typeHint").classList.toggle("show", state.typeMode === "and");
       render();
     });
 
@@ -448,6 +452,7 @@
       Object.values(regionPills).forEach(el => el.classList.add("active"));
       Object.values(sourcePills).forEach(el => el.classList.add("active"));
       document.querySelectorAll(".tmbtn").forEach(x => x.classList.toggle("active", x.dataset.mode === "or"));
+      document.getElementById("typeHint").classList.remove("show");
       document.getElementById("radius").value = "0";
       document.getElementById("favToggle").classList.remove("active");
       render();
@@ -659,6 +664,7 @@
       if (p.get("tm") === "and") {
         state.typeMode = "and";
         document.querySelectorAll(".tmbtn").forEach(x => x.classList.toggle("active", x.dataset.mode === "and"));
+        document.getElementById("typeHint").classList.add("show");
       }
       if (p.has("rad")) {
         state.radiusKm = Number(p.get("rad"));
