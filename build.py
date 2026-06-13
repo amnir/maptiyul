@@ -90,7 +90,8 @@ def same_place(r1, r2):
     # source pins the entrance, the other the town centroid. Coffee carts are
     # excluded — prefix stripping makes branches of one brand look identical.
     no_coffee = COFFEE_TYPE not in r1["types"] and COFFEE_TYPE not in r2["types"]
-    if d <= 2500 and no_coffee and norm_name(r1["title"]) == norm_name(r2["title"]):
+    n1, n2 = norm_name(r1["title"]), norm_name(r2["title"])
+    if d <= 2500 and no_coffee and n1 and n1 == n2:
         return True
     both_coffee = COFFEE_TYPE in r1["types"] and COFFEE_TYPE in r2["types"]
     if both_coffee and d <= 600 and sim >= 0.75:

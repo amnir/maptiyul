@@ -63,8 +63,9 @@ def main():
         if lat is None or lng is None:
             continue
         kept = {k: v for k, v in tags.items() if k in KEEP_TAGS}
-        # Skip POIs with a name but none of the enrichment fields.
-        if not any(k in kept for k in KEEP_TAGS[:8]):
+        # Skip POIs with a name but none of the enrichment fields (KEEP_TAGS[7:]
+        # are name variants, which every queried POI has — exclude them here).
+        if not any(k in kept for k in KEEP_TAGS[:7]):
             continue
         pois.append({
             "name": tags.get("name:he") or tags["name"],
