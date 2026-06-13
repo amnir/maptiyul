@@ -132,8 +132,18 @@
     .radiuswrap.show { display: flex; }
     .radiuswrap select { flex: 1; padding: 7px; border: 1px solid var(--line); border-radius: 9px;
       font-family: inherit; font-size: 13px; background: var(--glass-strong); }
-    .user-dot { width: 16px; height: 16px; border-radius: 50%; background: #2f6fd0;
-      border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(47,111,208,.3); }
+    .user-dot { position: relative; width: 16px; height: 16px; border-radius: 50%;
+      background: #2f6fd0; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+    .user-dot::before { content: ""; position: absolute; inset: -3px; z-index: -1;
+      border-radius: 50%; background: rgba(47,111,208,.45);
+      animation: user-pulse 2s ease-out infinite; }
+    @keyframes user-pulse {
+      0%   { transform: scale(1);   opacity: .6; }
+      100% { transform: scale(3.4); opacity: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .user-dot::before { animation: none; transform: scale(2); opacity: .35; }
+    }
 
     .listtoggle { width: 100%; margin-top: 8px; padding: 9px; border: 1px solid var(--line);
       background: var(--glass-strong); border-radius: 10px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
@@ -193,9 +203,9 @@
     .nav-btn.gmaps { color: #3c4043; }
     .nav-btn.gmaps:hover { border-color: #c9d6e4; }
 
-    .marker-dot {
-      width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff;
-      box-shadow: 0 1px 4px rgba(0,0,0,.4);
+    .marker-pin {
+      display: block;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,.4));
     }
 
     /* Mobile */
@@ -532,8 +542,11 @@
       const color = (REGION_META[region] || DEFAULT_REGION).color;
       return L.divIcon({
         className: "",
-        html: `<div class="marker-dot" style="background:${color}"></div>`,
-        iconSize: [16, 16], iconAnchor: [8, 8], popupAnchor: [0, -8],
+        html: `<svg class="marker-pin" width="26" height="36" viewBox="0 0 26 36" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M13 0C5.82 0 0 5.82 0 13c0 9.75 13 23 13 23s13-13.25 13-23C26 5.82 20.18 0 13 0z" fill="${color}" stroke="#fff" stroke-width="2"/>
+          <circle cx="13" cy="13" r="5" fill="#fff"/>
+        </svg>`,
+        iconSize: [26, 36], iconAnchor: [13, 36], popupAnchor: [0, -32],
       });
     }
     function esc(s) { return (s || "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
