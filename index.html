@@ -160,6 +160,12 @@
     .pop-body { padding: 10px 12px 12px; }
     .pop-title { font-weight: 800; font-size: 15px; margin: 0 0 6px; line-height: 1.25; }
     .pop-addr { font-size: 12px; color: var(--muted); margin: 0 0 6px; }
+    .pop-desc { font-size: 12px; color: #44535e; margin: 0 0 6px; line-height: 1.45;
+      max-height: 88px; overflow: hidden; }
+    .pop-meta { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+    .pop-meta a { color: var(--accent); text-decoration: none; }
+    .pop-tag.acc { background: #e3f2e8; color: #1d6b3a; font-weight: 700; }
+    .pop-weather { font-size: 12px; color: #44535e; margin: 0 0 6px; min-height: 15px; }
     .pop-dist { font-size: 12px; font-weight: 700; color: var(--accent); margin: 0 0 6px; }
     .fav-btn { width: 100%; margin: 0 0 8px; padding: 7px; border: 1px solid var(--line);
       background: #fff; border-radius: 9px; font-family: inherit; font-size: 13px; font-weight: 700;
@@ -221,6 +227,7 @@
         <div class="quickbar">
           <button id="locate" class="qbtn">📍 קרוב אליי</button>
           <button id="favToggle" class="qbtn">☆ מועדפים (<span id="favCount">0</span>)</button>
+          <button id="accToggle" class="qbtn">♿ נגישים</button>
           <button id="share" class="qbtn">🔗 שיתוף</button>
         </div>
         <div id="radiusWrap" class="radiuswrap">
@@ -331,6 +338,7 @@
       q: "",
       radiusKm: 0,
       favOnly: false,
+      accOnly: false,
       listOpen: false,
     };
 
@@ -457,6 +465,11 @@
       document.getElementById("favToggle").classList.toggle("active", state.favOnly);
       render();
     };
+    document.getElementById("accToggle").onclick = () => {
+      state.accOnly = !state.accOnly;
+      document.getElementById("accToggle").classList.toggle("active", state.accOnly);
+      render();
+    };
     document.getElementById("listToggle").onclick = () => {
       state.listOpen = !state.listOpen;
       const btn = document.getElementById("listToggle");
@@ -511,9 +524,17 @@
       const dkm = distanceKm(a);
       const dist = dkm != null ? `<p class="pop-dist">📍 ${dkm < 1 ? Math.round(dkm * 1000) + " מ׳" : dkm.toFixed(1) + " ק״מ"} ממך</p>` : "";
       const addr = a.address ? `<p class="pop-addr">📍 ${esc(a.address)}</p>` : "";
-      const links = (a.sources || []).map(s =>
+      const desc = a.description ? `<p class="pop-desc">${esc(a.description)}</p>` : "";
+      const hours = a.hours ? `<p class="pop-meta">🕒 ${esc(a.hours)}</p>` : "";
+      const phone = a.phone ? `<p class="pop-meta">📞 <a href="tel:${esc(a.phone)}">${esc(a.phone)}</a></p>` : "";
+      const feeTag = a.fee === "no" ? '<span class="pop-tag">כניסה חינם</span>'
+        : a.fee === "yes" ? '<span class="pop-tag">כניסה בתשלום</span>' : "";
+      const accTag = a.accessible ? '<span class="pop-tag acc">♿ נגיש</span>' : "";
+      let links = (a.sources || []).map(s =>
         `<a class="pop-link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.label || s.name)} ←</a>`
       ).join("");
+      if (a.website) links += `<a class="pop-link" href="${esc(a.website)}" target="_blank" rel="noopener">אתר רשמי ←</a>`;
+      if (a.wikipedia) links += `<a class="pop-link" href="${esc(a.wikipedia)}" target="_blank" rel="noopener">ויקיפדיה ←</a>`;
       const waze = `https://waze.com/ul?ll=${a.lat},${a.lng}&navigate=yes`;
       const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${a.lat},${a.lng}`;
       const nav = `<div class="pop-nav">
@@ -526,12 +547,50 @@
         <p class="pop-title">${esc(a.title)}</p>
         ${dist}
         ${addr}
-        <div class="pop-tags">${tags}</div>
+        ${desc}
+        ${hours}
+        ${phone}
+        <div class="pop-tags">${accTag}${feeTag}${tags}</div>
+        <div class="pop-weather" data-ll="${a.lat},${a.lng}"></div>
         ${nav}
         ${fav}
         <div class="pop-links">${links}</div>
       </div>`;
     }
+
+    // ---- Weather in popups (Open-Meteo, free, no key) ----
+    const weatherCache = {};
+    function wmoEmoji(code) {
+      if (code === 0) return "☀️";
+      if (code <= 2) return "🌤️";
+      if (code === 3) return "☁️";
+      if (code <= 48) return "🌫️";
+      if (code <= 67) return "🌧️";
+      if (code <= 77) return "🌨️";
+      if (code <= 82) return "🌦️";
+      return "⛈️";
+    }
+    map.on("popupopen", e => {
+      const el = e.popup.getElement() && e.popup.getElement().querySelector(".pop-weather");
+      if (!el) return;
+      const ll = el.dataset.ll;
+      if (weatherCache[ll]) { el.textContent = weatherCache[ll]; return; }
+      const [lat, lng] = ll.split(",");
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}` +
+            `&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code` +
+            `&forecast_days=1&timezone=auto`)
+        .then(r => r.json())
+        .then(d => {
+          const dd = d.daily;
+          const rain = dd.precipitation_probability_max[0];
+          const txt = `${wmoEmoji(dd.weather_code[0])} היום: ` +
+            `${Math.round(dd.temperature_2m_min[0])}°–${Math.round(dd.temperature_2m_max[0])}°` +
+            (rain > 20 ? ` · ☔ ${rain}% גשם` : "");
+          weatherCache[ll] = txt;
+          el.textContent = txt;
+        })
+        .catch(() => { el.textContent = ""; });
+    });
 
     const markers = data.map(a => {
       const m = L.marker([a.lat, a.lng], { icon: markerIcon(a.region) });
@@ -545,6 +604,7 @@
       if (!(a.sources || []).some(s => state.sources.has(s.name))) return false;
       if (userLatLng && state.radiusKm > 0 && distanceKm(a) > state.radiusKm) return false;
       if (state.favOnly && !favorites.has(a.id)) return false;
+      if (state.accOnly && !a.accessible) return false;
       const ts = a.types || [];
       if (ts.length === 0) { if (state.types.size === 0) return false; }
       else if (!ts.some(t => state.types.has(t))) return false;
@@ -578,6 +638,7 @@
       const so = offIndices(sources, state.sources); if (so) p.set("so", so);
       const to = offIndices(allTypes, state.types); if (to) p.set("to", to);
       if (state.favOnly) p.set("fav", "1");
+      if (state.accOnly) p.set("acc", "1");
       if (state.radiusKm) p.set("rad", state.radiusKm);
       const c = map.getCenter();
       p.set("v", `${map.getZoom()}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`);
@@ -602,6 +663,10 @@
       if (p.get("fav") === "1") {
         state.favOnly = true;
         document.getElementById("favToggle").classList.add("active");
+      }
+      if (p.get("acc") === "1") {
+        state.accOnly = true;
+        document.getElementById("accToggle").classList.add("active");
       }
       if (p.has("rad")) {
         state.radiusKm = Number(p.get("rad"));
