@@ -241,6 +241,28 @@ def enrich_from_osm(place, index):
     return added
 
 
+# A Hebrew Wikipedia geosearch tends to return the nearest *settlement* when a
+# place title is a descriptive trail/forest/viewpoint name that merely mentions a
+# moshav or kibbutz. Such an extract describes the village, not the attraction —
+# misleading, so we drop it unless the attraction's name essentially *is* that
+# place (e.g. "העיר העתיקה צפת" → צפת is fine).
+SETTLEMENT_MARKERS = (
+    "הוא מושב", "היא מושבה", "הייתה מושבה", "הוא קיבוץ", "היא קיבוץ",
+    "הוא יישוב", "הוא ישוב", "יישוב קהילתי", "היא עיר", "הוא כפר",
+    "מועצה מקומית", "מועצה אזורית ", "הוא שריד",
+)
+
+
+def wiki_trustworthy(place_title, w):
+    extract_head = (w.get("extract") or "")[:80]
+    if not any(m in extract_head for m in SETTLEMENT_MARKERS):
+        return True  # describes a feature (spring, nahal, park, ruin, museum…)
+    # Settlement profile: keep only when the names essentially match.
+    ta, tb = set(norm_name(place_title).split()), set(norm_name(w["wp_title"]).split())
+    jac = len(ta & tb) / len(ta | tb) if ta and tb else 0
+    return jac >= 0.6
+
+
 def main():
     files = sorted(glob.glob(os.path.join(RAW_DIR, "*.json")))
     records = []
@@ -272,14 +294,18 @@ def main():
     wiki_fp = os.path.join(ENRICH_DIR, "wikipedia.json")
     if os.path.exists(wiki_fp):
         wiki = json.load(open(wiki_fp, encoding="utf-8"))
-        n_wiki = 0
+        n_wiki = n_skip = 0
         for p in merged:
             w = wiki.get(p["title"])
             if w and w.get("extract") and not p.get("description"):
+                if not wiki_trustworthy(p["title"], w):
+                    n_skip += 1
+                    continue
                 p["description"] = w["extract"]
                 p["wikipedia"] = w.get("url")
                 n_wiki += 1
-        print(f"Wikipedia enrichment: {n_wiki} descriptions added")
+        print(f"Wikipedia enrichment: {n_wiki} descriptions added "
+              f"({n_skip} settlement-profile matches skipped)")
 
     # Derived accessibility flag: OSM wheelchair tag or a נגיש keyword/type.
     n_acc = 0
