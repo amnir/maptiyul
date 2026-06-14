@@ -121,11 +121,11 @@
     .btn:hover { background: #fff; }
     .btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
 
-    .quickbar { display: flex; gap: 8px; margin-top: 10px; }
-    .qbtn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    .quickbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .qbtn { flex: 1 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
       padding: 9px; border: 1px solid var(--line); background: var(--glass-strong); border-radius: 10px;
       font-size: 13px; font-family: inherit; cursor: pointer; transition: .12s;
-      white-space: nowrap; min-width: 0; }
+      white-space: nowrap; min-width: 96px; }
     .qbtn:hover { background: #fff; }
     .qbtn.active { background: var(--accent); color: #fff; border-color: transparent; }
     .radiuswrap { display: none; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--muted); }
@@ -187,6 +187,12 @@
     .fav-btn.on { background: #fff2cc; border-color: #f0c14b; color: #8a6d1a; }
     .pop-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 11px; }
     .pop-tag { font-size: 11px; background: #eef3f5; color: #34566a; padding: 3px 9px; border-radius: 999px; font-weight: 600; }
+    .oh { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 7px; }
+    .oh-badge, .oh-sat { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+      display: inline-flex; align-items: center; gap: 4px; }
+    .oh-badge.open, .oh-sat.open { background: #e3f2e8; color: #1d6b3a; }
+    .oh-badge.closed, .oh-sat.closed { background: #fce8e8; color: #b3261e; }
+    .oh-na { color: var(--muted); font-style: italic; }
     .pop-links { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 2px; }
     .pop-link { display: inline-block; font-size: 13px; font-weight: 700; color: var(--accent); text-decoration: none; }
     .pop-link:hover { text-decoration: underline; }
@@ -247,6 +253,8 @@
           <button id="locate" class="qbtn">📍 קרוב אליי</button>
           <button id="favToggle" class="qbtn"><span>☆ מועדפים (<span id="favCount">0</span>)</span></button>
           <button id="accToggle" class="qbtn">♿ נגישים</button>
+          <button id="nowToggle" class="qbtn" title="מסתיר רק מקומות שידוע שסגורים עכשיו">🟢 פתוח עכשיו</button>
+          <button id="satToggle" class="qbtn" title="מסתיר רק מקומות שידוע שסגורים בשבת">🗓️ פתוח בשבת</button>
           <button id="share" class="qbtn">🔗 שיתוף</button>
         </div>
         <div id="radiusWrap" class="radiuswrap">
@@ -368,8 +376,11 @@
       radiusKm: 0,
       favOnly: false,
       accOnly: false,
+      openNow: false,
+      openSat: false,
       listOpen: false,
     };
+    let NOW = new Date();
 
     // ---- Location / distance ----
     let userLatLng = null;
@@ -499,6 +510,16 @@
       document.getElementById("accToggle").classList.toggle("active", state.accOnly);
       render();
     };
+    document.getElementById("nowToggle").onclick = () => {
+      state.openNow = !state.openNow;
+      document.getElementById("nowToggle").classList.toggle("active", state.openNow);
+      render();
+    };
+    document.getElementById("satToggle").onclick = () => {
+      state.openSat = !state.openSat;
+      document.getElementById("satToggle").classList.toggle("active", state.openSat);
+      render();
+    };
     document.getElementById("listToggle").onclick = () => {
       state.listOpen = !state.listOpen;
       const btn = document.getElementById("listToggle");
@@ -553,6 +574,116 @@
     const PIN_SVG = '<svg width="12" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2C8.1 2 5 5.1 5 9c0 5 7 13 7 13s7-8 7-13c0-3.9-3.1-7-7-7z" fill="currentColor"/><circle cx="12" cy="9" r="2.5" fill="#fff"/></svg>';
     const WAZE_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3C7.2 3 3.3 6.2 3.3 10.3c0 1.6.6 3.1 1.7 4.3-.2 1-.7 1.9-1.4 2.6-.4.4-.1 1 .4 1 1.7 0 3.2-.6 4.2-1.5 1.2.4 2.5.5 3.8.5 4.8 0 8.7-3.2 8.7-7.4S16.8 3 12 3z" fill="#33ccff"/><circle cx="9.3" cy="10.1" r="1" fill="#fff"/><circle cx="13.9" cy="10.1" r="1" fill="#fff"/><path d="M8.9 12.6c.7 1 1.9 1.6 3.2 1.6s2.5-.6 3.2-1.6" stroke="#fff" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>';
     const GMAPS_SVG = '<svg width="16" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M16.5 3.4A7 7 0 0 0 5.6 5.2l4.2 3.6 6.7-5.4z" fill="#4285F4"/><path d="M5.6 5.2A7 7 0 0 0 5 9c0 1.6.6 3.1 1.4 4.6l3.4-4.8L5.6 5.2z" fill="#34A853"/><path d="M12 5.9A3.1 3.1 0 0 1 15.1 9c0 .8-.3 1.6-.8 2.2l4-5.2a7 7 0 0 0-1.8-2.6l-6.7 5.4A3.1 3.1 0 0 1 12 5.9z" fill="#FBBC04"/><path d="M12 22s1.8-2.3 3.6-5l-1.3-1.8c-.5.6-1.3 1-2.3 1A3.1 3.1 0 0 1 8.9 13l-2.5-3.4C6 9.5 6 9.8 6 9c0 1.6.6 3.1 1.4 4.6C9.6 17.3 12 22 12 22z" fill="#EA4335"/><circle cx="12" cy="9" r="2.6" fill="#fff"/></svg>';
+    // ---- Opening hours engine ----
+    // Parses the two formats present in the data: a subset of OSM `opening_hours`
+    // (day ranges, time ranges, off, PH, summer/winter, 24/7, bare time ranges) and
+    // the parks Hebrew seasonal form "קיץ HH:MM–HH:MM · חורף HH:MM–HH:MM" (open daily).
+    // Day index follows JS getDay(): Su=0 … Sa=6.
+    const DAY_IDX = { su: 0, mo: 1, tu: 2, we: 3, th: 4, fr: 5, sa: 6 };
+    // Apr–Sep ≈ the parks "summer" season; good enough for seasonal closing times.
+    function isSummer(d) { const m = d.getMonth() + 1; return m >= 4 && m <= 9; }
+    function parseTime(t) {
+      const m = /^(\d{1,2}):(\d{2})$/.exec((t || "").trim());
+      return m ? (+m[1]) * 60 + (+m[2]) : null;
+    }
+    function fmtMin(m) {
+      m = ((m % 1440) + 1440) % 1440;
+      return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+    }
+    function parseRanges(spec) { // "off"/"closed" -> []; "HH:MM-HH:MM,HH:MM-HH:MM" -> [[s,e],...]
+      spec = (spec || "").trim();
+      if (!spec || /^(off|closed)$/i.test(spec)) return [];
+      const out = [];
+      spec.split(",").forEach(part => {
+        const m = /^(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})$/.exec(part.trim());
+        if (m) { const a = parseTime(m[1]), b = parseTime(m[2]); if (a != null && b != null) out.push([a, b]); }
+      });
+      return out;
+    }
+    function parseDays(spec) { // "Mo-Th, Sa, Su" / "Fr,Sa" -> [day idx]; PH/unknown ignored
+      const days = [];
+      spec.split(",").forEach(tok => {
+        tok = tok.trim().toLowerCase();
+        const rng = /^([a-z]{2})\s*-\s*([a-z]{2})$/.exec(tok);
+        if (rng && DAY_IDX[rng[1]] != null && DAY_IDX[rng[2]] != null) {
+          let k = DAY_IDX[rng[1]]; const end = DAY_IDX[rng[2]];
+          for (let i = 0; i < 7; i++) { days.push(k); if (k === end) break; k = (k + 1) % 7; }
+        } else if (DAY_IDX[tok] != null) days.push(DAY_IDX[tok]);
+      });
+      return days;
+    }
+    function parseHours(str) {
+      const s = (str || "").trim();
+      if (!s) return null;
+      if (s === "24/7") return { always: true };
+      if (/קיץ|חורף/.test(s)) { // Hebrew seasonal, open every day
+        let summer = null, winter = null;
+        s.split(/[·;]/).forEach(part => {
+          const m = /(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/.exec(part);
+          if (!m) return;
+          const r = [parseTime(m[1]), parseTime(m[2])];
+          if (/קיץ/.test(part)) summer = r; else if (/חורף/.test(part)) winter = r;
+        });
+        if (!summer && !winter) return null;
+        return { seasonalHe: { summer, winter } };
+      }
+      // per-day ranges: null = untouched, [] = closed, [[s,e]] = open, "unknown" = day listed w/o time
+      const plain = Array(7).fill(null), summer = Array(7).fill(null), winter = Array(7).fill(null);
+      let any = false, sawTime = false;
+      s.split(";").forEach(rule => {
+        rule = rule.trim();
+        if (!rule) return;
+        let target = plain, m;
+        if ((m = /^summer\s+/i.exec(rule))) { target = summer; rule = rule.slice(m[0].length); }
+        else if ((m = /^winter\s+/i.exec(rule))) { target = winter; rule = rule.slice(m[0].length); }
+        const tm = /(\d{1,2}:\d{2}.*|off|closed)\s*$/i.exec(rule);
+        const dayPart = (tm ? rule.slice(0, tm.index) : rule).trim().replace(/,\s*$/, "");
+        const timePart = tm ? tm[1] : null;
+        let days;
+        if (!dayPart) days = [0, 1, 2, 3, 4, 5, 6];
+        else { days = parseDays(dayPart); if (!days.length) return; } // e.g. "PH off" -> no-op
+        const ranges = timePart != null ? parseRanges(timePart) : "unknown";
+        if (ranges !== "unknown") sawTime = true;
+        any = true;
+        days.forEach(d => { target[d] = ranges; });
+      });
+      if (!any) return null;
+      return { rules: { plain, summer, winter }, sawTime };
+    }
+    const _schedCache = new Map();
+    function schedFor(a) {
+      if (a._sched !== undefined) return a._sched;
+      if (!a.hours) return (a._sched = null);
+      if (!_schedCache.has(a.hours)) { try { _schedCache.set(a.hours, parseHours(a.hours)); } catch (e) { _schedCache.set(a.hours, null); } }
+      return (a._sched = _schedCache.get(a.hours));
+    }
+    function dayRanges(sched, dayIdx, now) { // -> [[s,e],...] | [] (closed) | "unknown"
+      if (!sched) return "unknown";
+      if (sched.always) return [[0, 1440]];
+      if (sched.seasonalHe) {
+        const r = isSummer(now) ? (sched.seasonalHe.summer || sched.seasonalHe.winter)
+                                : (sched.seasonalHe.winter || sched.seasonalHe.summer);
+        return r ? [r] : "unknown";
+      }
+      const seas = isSummer(now) ? sched.rules.summer : sched.rules.winter;
+      const r = seas[dayIdx] != null ? seas[dayIdx] : sched.rules.plain[dayIdx];
+      if (r == null) return sched.sawTime ? [] : "unknown"; // unlisted day -> closed when other days are timed
+      return r;
+    }
+    function nowStatus(sched, now) {
+      const r = dayRanges(sched, now.getDay(), now);
+      if (r === "unknown") return { status: "unknown" };
+      const mins = now.getHours() * 60 + now.getMinutes();
+      for (const [a, b] of r) { const end = b <= a ? b + 1440 : b; if (mins >= a && mins < end) return { status: "open", until: b }; }
+      return { status: "closed" };
+    }
+    function satStatus(sched, now) {
+      const r = dayRanges(sched, 6, now);
+      if (r === "unknown") return { status: "unknown" };
+      if (!r.length) return { status: "closed" };
+      return { status: "open", ranges: r };
+    }
+
     function popupHtml(a) {
       const tags = (a.types || []).slice(0, 4).map(t => `<span class="pop-tag">${esc(t)}</span>`).join("");
       const img = a.image ? `<img class="pop-img" src="${esc(a.image)}" loading="lazy" onerror="this.style.display='none'">` : "";
@@ -560,7 +691,22 @@
       const dist = dkm != null ? `<p class="pop-dist">${PIN_SVG} ${dkm < 1 ? Math.round(dkm * 1000) + " מ׳" : dkm.toFixed(1) + " ק״מ"} ממך</p>` : "";
       const addr = a.address ? `<p class="pop-addr">${PIN_SVG}<span>${esc(a.address)}</span></p>` : "";
       const desc = a.description ? `<p class="pop-desc">${esc(a.description)}</p>` : "";
-      const hours = a.hours ? `<p class="pop-meta">🕒 ${esc(a.hours)}</p>` : "";
+      let hours;
+      if (a.hours) {
+        const sched = schedFor(a), n = new Date();
+        const ns = nowStatus(sched, n), ss = satStatus(sched, n);
+        let badge = "";
+        const showUntil = ns.until != null && ns.until > 0 && ns.until < 1440;
+        if (ns.status === "open") badge = `<span class="oh-badge open">🟢 פתוח עכשיו${showUntil ? ` · עד ${fmtMin(ns.until)}` : ""}</span>`;
+        else if (ns.status === "closed") badge = `<span class="oh-badge closed">🔴 סגור עכשיו</span>`;
+        let sat = "";
+        if (ss.status === "open") { const rt = ss.ranges.map(r => `${fmtMin(r[0])}–${fmtMin(r[1])}`).join(", "); sat = `<span class="oh-sat open">🗓️ שבת: פתוח ${rt}</span>`; }
+        else if (ss.status === "closed") sat = `<span class="oh-sat closed">🗓️ שבת: סגור</span>`;
+        const head = (badge || sat) ? `<div class="oh">${badge}${sat}</div>` : "";
+        hours = `${head}<p class="pop-meta">🕒 ${esc(a.hours)}</p>`;
+      } else {
+        hours = `<p class="pop-meta oh-na">🕒 שעות פעילות לא ידועות</p>`;
+      }
       const phone = a.phone ? `<p class="pop-meta">📞 <a href="tel:${esc(a.phone)}">${esc(a.phone)}</a></p>` : "";
       const feeTag = a.fee === "no" ? '<span class="pop-tag">כניסה חינם</span>'
         : a.fee === "yes" ? '<span class="pop-tag">כניסה בתשלום</span>' : "";
@@ -640,6 +786,9 @@
       if (userLatLng && state.radiusKm > 0 && distanceKm(a) > state.radiusKm) return false;
       if (state.favOnly && !favorites.has(a.id)) return false;
       if (state.accOnly && !a.accessible) return false;
+      // Fail open: hide only places known to be closed; keep open + unknown-hours places.
+      if (state.openNow && nowStatus(schedFor(a), NOW).status === "closed") return false;
+      if (state.openSat && satStatus(schedFor(a), NOW).status === "closed") return false;
       const ts = a.types || [];
       if (ts.length === 0) { if (state.types.size === 0) return false; }
       else if (!ts.some(t => state.types.has(t))) return false;
@@ -651,6 +800,7 @@
     }
 
     function render() {
+      NOW = new Date();
       cluster.clearLayers();
       const shown = markers.filter(m => matches(m._data));
       cluster.addLayers(shown);
@@ -674,6 +824,8 @@
       const to = offIndices(allTypes, state.types); if (to) p.set("to", to);
       if (state.favOnly) p.set("fav", "1");
       if (state.accOnly) p.set("acc", "1");
+      if (state.openNow) p.set("on", "1");
+      if (state.openSat) p.set("os", "1");
       if (state.radiusKm) p.set("rad", state.radiusKm);
       const c = map.getCenter();
       p.set("v", `${map.getZoom()}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`);
@@ -702,6 +854,14 @@
       if (p.get("acc") === "1") {
         state.accOnly = true;
         document.getElementById("accToggle").classList.add("active");
+      }
+      if (p.get("on") === "1") {
+        state.openNow = true;
+        document.getElementById("nowToggle").classList.add("active");
+      }
+      if (p.get("os") === "1") {
+        state.openSat = true;
+        document.getElementById("satToggle").classList.add("active");
       }
       if (p.has("rad")) {
         state.radiusKm = Number(p.get("rad"));
