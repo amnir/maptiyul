@@ -229,6 +229,125 @@
         padding: 10px 14px; font-size: 14px; font-family: inherit; box-shadow: var(--shadow); cursor: pointer;
       }
     }
+    /* ===== AI Trip Planner (hard-coded simulation) ===== */
+    .fab-plan {
+      position: absolute; left: 50%; transform: translateX(-50%); bottom: 22px; z-index: 1200;
+      display: inline-flex; align-items: center; gap: 9px; padding: 13px 22px;
+      border: none; border-radius: 999px; cursor: pointer; font-family: inherit;
+      font-size: 15px; font-weight: 800; color: #fff;
+      background: linear-gradient(135deg, #7c3aed, #1f7a8c);
+      box-shadow: 0 8px 26px rgba(76,29,149,.42); transition: transform .15s, box-shadow .15s;
+    }
+    .fab-plan:hover { transform: translateX(-50%) translateY(-2px); box-shadow: 0 12px 32px rgba(76,29,149,.5); }
+    .fab-plan .spark { font-size: 17px; }
+    .fab-plan .sim { font-size: 10px; font-weight: 700; background: rgba(255,255,255,.25); padding: 2px 7px; border-radius: 999px; }
+
+    .trip-backdrop {
+      position: absolute; inset: 0; z-index: 1300; background: rgba(15,25,35,.45);
+      -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+      display: none; align-items: center; justify-content: center; padding: 14px;
+    }
+    .trip-backdrop.show { display: flex; }
+    .trip-sheet {
+      width: min(440px, 100%); background: var(--panel); border-radius: 22px;
+      box-shadow: var(--shadow); padding: 20px; direction: rtl; text-align: right;
+    }
+    .trip-sheet h2 { margin: 0 0 3px; font-size: 20px; font-weight: 800; letter-spacing: -.02em; }
+    .trip-sheet .sub { margin: 0 0 14px; font-size: 13px; color: var(--muted); line-height: 1.45; }
+    .trip-input {
+      width: 100%; min-height: 76px; resize: none; padding: 12px 14px; border: 1px solid var(--line);
+      border-radius: 14px; font-family: inherit; font-size: 15px; outline: none; background: #f7fafb; line-height: 1.5;
+    }
+    .trip-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31,122,140,.12); }
+    .trip-chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 12px 0 16px; }
+    .trip-chip {
+      border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 7px 13px;
+      font-size: 13px; font-family: inherit; cursor: pointer; transition: .12s;
+    }
+    .trip-chip:hover { border-color: #c9d3db; }
+    .trip-chip.on { background: #f3eaff; border-color: #c9aef5; color: #5b21b6; font-weight: 700; }
+    .trip-go {
+      width: 100%; padding: 13px; border: none; border-radius: 14px; cursor: pointer;
+      font-family: inherit; font-size: 15px; font-weight: 800; color: #fff;
+      background: linear-gradient(135deg, #7c3aed, #1f7a8c);
+    }
+    .trip-cancel { width: 100%; margin-top: 8px; padding: 10px; border: none; background: none;
+      color: var(--muted); font-family: inherit; font-size: 13px; cursor: pointer; }
+
+    .trip-think { display: flex; align-items: center; gap: 12px; padding: 10px 2px; font-size: 14px; color: var(--ink); }
+    .trip-spin {
+      width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+      border: 3px solid rgba(124,58,237,.25); border-top-color: #7c3aed; animation: trip-rot .7s linear infinite;
+    }
+    @keyframes trip-rot { to { transform: rotate(360deg); } }
+
+    .trip-panel {
+      position: absolute; top: 14px; left: 14px; z-index: 1100; width: 340px;
+      max-height: calc(100dvh - 28px); background: var(--glass);
+      -webkit-backdrop-filter: blur(20px) saturate(150%); backdrop-filter: blur(20px) saturate(150%);
+      border: 1px solid var(--glass-border); border-radius: 20px; box-shadow: var(--shadow);
+      display: none; flex-direction: column; overflow: hidden; direction: rtl; text-align: right;
+    }
+    .trip-panel.show { display: flex; }
+    .trip-phead {
+      position: relative; padding: 16px 18px 12px; border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(124,58,237,.10), rgba(31,122,140,.10));
+    }
+    .trip-phead .ttl { font-size: 18px; font-weight: 800; letter-spacing: -.02em; margin: 0; }
+    .trip-phead .meta { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+    .trip-phead .close {
+      position: absolute; top: 12px; left: 12px; border: none; background: rgba(255,255,255,.7);
+      width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 14px; color: var(--muted);
+    }
+    .trip-intro {
+      font-size: 13px; color: #44535e; line-height: 1.5; padding: 12px 18px;
+      border-bottom: 1px solid var(--line); display: flex; gap: 8px;
+    }
+    .trip-intro .ai { flex-shrink: 0; font-size: 15px; }
+    .trip-body { padding: 6px 14px 12px; overflow-y: auto; flex: 1; }
+
+    .tstop { display: flex; gap: 11px; padding: 8px 6px 0; cursor: pointer; border-radius: 12px; }
+    .tstop:hover { background: rgba(255,255,255,.55); }
+    .tstop .num {
+      width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; color: #fff; font-weight: 800; font-size: 14px;
+      display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #7c3aed, #1f7a8c); box-shadow: 0 2px 6px rgba(76,29,149,.35);
+    }
+    .tstop .body { flex: 1; padding-bottom: 4px; }
+    .tstop .row1 { display: flex; align-items: baseline; gap: 7px; }
+    .tstop .time { font-weight: 800; font-size: 14px; color: var(--accent); }
+    .tstop .kind { font-size: 11px; background: #eef3f5; color: #34566a; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
+    .tstop .name { font-weight: 800; font-size: 15px; margin: 3px 0 2px; line-height: 1.3; }
+    .tstop .why { font-size: 12.5px; color: #55656f; line-height: 1.45; }
+    .tstop .dur { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+    .tleg { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--muted); font-size: 12px; }
+    .tleg .line {
+      width: 2px; height: 18px; margin-inline-start: 14px; flex-shrink: 0;
+      background: repeating-linear-gradient(#b9c6d0, #b9c6d0 3px, transparent 3px, transparent 6px);
+    }
+
+    .trip-actions { padding: 12px 16px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+    .trip-actions .nav {
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 12px;
+      border-radius: 13px; font-family: inherit; font-size: 14px; font-weight: 800; text-decoration: none;
+      cursor: pointer; border: none; background: linear-gradient(135deg, #7c3aed, #1f7a8c); color: #fff;
+    }
+    .trip-actions .redo { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+
+    .route-num {
+      width: 30px; height: 30px; border-radius: 50% 50% 50% 2px; transform: rotate(45deg);
+      background: linear-gradient(135deg, #7c3aed, #1f7a8c); border: 2px solid #fff;
+      box-shadow: 0 2px 6px rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center;
+      transition: transform .35s cubic-bezier(.2,1.5,.4,1), opacity .25s ease;
+    }
+    .route-num.is-pre { transform: rotate(45deg) scale(0); opacity: 0; }
+    .route-num span { transform: rotate(-45deg); color: #fff; font-weight: 800; font-size: 13px; }
+    @media (prefers-reduced-motion: reduce) { .route-num { transition: none; } }
+
+    @media (max-width: 720px) {
+      .trip-panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 72dvh; border-radius: 20px 20px 0 0; }
+      .fab-plan { bottom: 16px; }
+    }
   </style>
 </head>
 <body>
@@ -283,6 +402,17 @@
         </div>
       </div>
     </aside>
+
+    <!-- AI Trip Planner — hard-coded simulation -->
+    <button id="fabPlan" class="fab-plan">
+      <span class="spark">✨</span> תכנן לי טיול
+      <span class="sim">סימולציה</span>
+    </button>
+    <div id="tripBackdrop" class="trip-backdrop">
+      <div class="trip-sheet" id="tripSheet"></div>
+    </div>
+    <aside id="tripPanel" class="trip-panel"></aside>
+
     <div id="map"></div>
   </div>
 
@@ -734,6 +864,236 @@
     if ("serviceWorker" in navigator && location.protocol === "https:") {
       navigator.serviceWorker.register("sw.js");
     }
+
+    // ===================================================================
+    //  AI Trip Planner — HARD-CODED SIMULATION
+    //  Demonstrates the UX of "plan me half a day around Netanya with a
+    //  coffee cart + indoor activity". Stops below are REAL pins from the
+    //  dataset; the plan/ordering/copy are hand-authored to stand in for
+    //  what the LLM agent would generate from a geo+category prefilter.
+    // ===================================================================
+    (function () {
+      const TRIP = {
+        query: "תכנן לי חצי יום בנתניה עם עגלת קפה ופעילות מקורה",
+        title: "חצי יום בנתניה",
+        subtitle: "‏09:30–14:15 · כ-4.5 שעות · 4 עצירות · מתאים למשפחות",
+        intro: "סיננתי 224 מקומות ברדיוס 5 ק״מ מנתניה. פתחתי בעגלת קפה, שמרתי את הפעילות המקורה לשעת הצהריים החמה, וסידרתי את העצירות לפי מסלול נסיעה קצר לאורך מצוקי הים.",
+        stops: [
+          {
+            time: "09:30", dur: "30 דק׳", emoji: "☕", kind: "עגלת קפה",
+            title: "העגלה של גילי", lat: 32.3509, lng: 34.8766,
+            why: "פתיחת בוקר רגועה בעגלת קפה מקומית עם ישיבה בחוץ — בדיוק מה שביקשת.",
+            leg: { mode: "car", min: 7, km: 2.4 },
+          },
+          {
+            time: "10:15", dur: "60 דק׳", emoji: "🌊", kind: "טיילת ונוף",
+            title: "טיילות נתניה", lat: 32.3428, lng: 34.8533,
+            why: "טיילת מצוקי הכורכר מעל הים בשעת בוקר נעימה, לפני שמתחמם.",
+            leg: { mode: "walk", min: 22, km: 1.8 },
+          },
+          {
+            time: "11:30", dur: "45 דק׳", emoji: "🏖", kind: "חוף",
+            title: "חוף סירונית", lat: 32.3274, lng: 34.8481,
+            why: "ירידה במעלית המצוק לחוף — הפסקה קצרה על שפת הים.",
+            leg: { mode: "car", min: 6, km: 1.8 },
+          },
+          {
+            time: "12:45", dur: "90 דק׳", emoji: "🚀", kind: "פעילות מקורה",
+            title: "פלנתניה: מרכז מדע, חלל ותרבות יפן", lat: 32.3109, lng: 34.8480,
+            why: "הפעילות המקורה שביקשת — מרכז מדע אינטראקטיבי, מושלם לשעת הצהריים החמה (וגיבוי מצוין ליום גשום).",
+            leg: null,
+          },
+        ],
+      };
+
+      const panel = document.getElementById("tripPanel");
+      const backdrop = document.getElementById("tripBackdrop");
+      const sheet = document.getElementById("tripSheet");
+      let routeLayer = null;
+
+      function gmapsUrl() {
+        const s = TRIP.stops;
+        const origin = `${s[0].lat},${s[0].lng}`;
+        const dest = `${s[s.length - 1].lat},${s[s.length - 1].lng}`;
+        const wp = s.slice(1, -1).map(p => `${p.lat},${p.lng}`).join("|");
+        return `https://www.google.com/maps/dir/?api=1&origin=${origin}` +
+          `&destination=${dest}&waypoints=${encodeURIComponent(wp)}&travelmode=driving`;
+      }
+
+      // Match a hand-authored stop back to the real dataset pin (for a rich popup).
+      function matchStop(s) {
+        let best = null, bd = 1e9;
+        for (const a of data) {
+          const d = Math.abs(a.lat - s.lat) + Math.abs(a.lng - s.lng);
+          if (d < bd) { bd = d; best = a; }
+        }
+        return bd < 0.002 ? best : null;
+      }
+
+      function clearRoute() {
+        if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+        if (!map.hasLayer(cluster)) map.addLayer(cluster);
+      }
+
+      function closeTrip() {
+        clearRoute();
+        panel.classList.remove("show");
+      }
+
+      function revealMarker(s) {
+        const el = s._m && s._m.getElement();
+        const n = el && el.querySelector(".route-num");
+        if (n) n.classList.remove("is-pre");
+      }
+
+      function drawRoute() {
+        clearRoute();
+        routeLayer = L.layerGroup().addTo(map);
+        const latlngs = TRIP.stops.map(s => L.latLng(s.lat, s.lng));
+
+        // Numbered pins — added now (so clicks work) but hidden until the line reaches them.
+        TRIP.stops.forEach((s, i) => {
+          const a = matchStop(s);
+          const icon = L.divIcon({
+            className: "",
+            html: `<div class="route-num is-pre"><span>${i + 1}</span></div>`,
+            iconSize: [30, 30], iconAnchor: [15, 28], popupAnchor: [0, -28],
+          });
+          const m = L.marker([s.lat, s.lng], { icon, zIndexOffset: 2000 }).addTo(routeLayer);
+          if (a) m.bindPopup(() => popupHtml(a), { minWidth: 240, maxWidth: 240 });
+          s._m = m;
+          s._shown = false;
+        });
+
+        map.removeLayer(cluster); // declutter so the route reads clearly
+        const mobile = window.matchMedia("(max-width: 720px)").matches;
+        map.fitBounds(L.latLngBounds(latlngs), mobile
+          ? { paddingTopLeft: [20, 20], paddingBottomRight: [20, Math.round(window.innerHeight * 0.5)] }
+          : { paddingTopLeft: [370, 30], paddingBottomRight: [40, 40] });
+
+        // Cumulative leg lengths so the line can be drawn at a constant speed.
+        const cum = [0];
+        for (let i = 1; i < latlngs.length; i++) cum[i] = cum[i - 1] + latlngs[i - 1].distanceTo(latlngs[i]);
+        const total = cum[cum.length - 1] || 1;
+
+        const casing = L.polyline([latlngs[0]], { color: "#fff", weight: 7, opacity: .9 }).addTo(routeLayer);
+        const line = L.polyline([latlngs[0]], { color: "#7c3aed", weight: 4, opacity: .95, dashArray: "1 9", lineCap: "round" }).addTo(routeLayer);
+
+        const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (reduced) {
+          casing.setLatLngs(latlngs); line.setLatLngs(latlngs);
+          TRIP.stops.forEach(s => { s._shown = true; revealMarker(s); });
+          return;
+        }
+
+        const DUR = 2800, t0 = performance.now();
+        function frame(now) {
+          if (!routeLayer) return; // bailed out (closed/redone mid-animation)
+          const p = Math.min(1, (now - t0) / DUR);
+          const drawn = (1 - Math.pow(1 - p, 3)) * total; // easeOutCubic
+          const part = [latlngs[0]];
+          for (let i = 1; i < latlngs.length; i++) {
+            if (drawn >= cum[i]) { part.push(latlngs[i]); continue; }
+            const f = (drawn - cum[i - 1]) / (cum[i] - cum[i - 1]);
+            if (f > 0) part.push(L.latLng(
+              latlngs[i - 1].lat + (latlngs[i].lat - latlngs[i - 1].lat) * f,
+              latlngs[i - 1].lng + (latlngs[i].lng - latlngs[i - 1].lng) * f));
+            break;
+          }
+          casing.setLatLngs(part); line.setLatLngs(part);
+          TRIP.stops.forEach((s, i) => { if (!s._shown && drawn >= cum[i] - 1) { s._shown = true; revealMarker(s); } });
+          if (p < 1) requestAnimationFrame(frame);
+          else TRIP.stops.forEach(s => { if (!s._shown) { s._shown = true; revealMarker(s); } });
+        }
+        requestAnimationFrame(frame);
+      }
+
+      function panelHTML() {
+        const stops = TRIP.stops.map((st, i) => {
+          const leg = st.leg
+            ? `<div class="tleg"><span class="line"></span>${st.leg.mode === "walk" ? "🚶" : "🚗"} ${st.leg.min} דק׳ · ${st.leg.km} ק״מ</div>`
+            : "";
+          return `<div class="tstop" data-i="${i}">
+              <div class="num">${i + 1}</div>
+              <div class="body">
+                <div class="row1"><span class="time">${esc(st.time)}</span><span class="kind">${st.emoji} ${esc(st.kind)}</span></div>
+                <div class="name">${esc(st.title)}</div>
+                <div class="why">${esc(st.why)}</div>
+                <div class="dur">⏱️ ${esc(st.dur)}</div>
+              </div></div>${leg}`;
+        }).join("");
+        return `
+          <div class="trip-phead">
+            <button class="close" id="tripClose" aria-label="סגור">✕</button>
+            <p class="ttl">✨ ${esc(TRIP.title)}</p>
+            <div class="meta">${esc(TRIP.subtitle)}</div>
+          </div>
+          <div class="trip-intro"><span class="ai">✨</span><span>${esc(TRIP.intro)}</span></div>
+          <div class="trip-body">${stops}</div>
+          <div class="trip-actions">
+            <a class="nav" href="${gmapsUrl()}" target="_blank" rel="noopener">🧭 פתח את כל המסלול ב-Google Maps</a>
+            <button class="nav redo" id="tripRedo">↻ תכנן מחדש</button>
+          </div>`;
+      }
+
+      function showTrip() {
+        drawRoute();
+        panel.innerHTML = panelHTML();
+        panel.classList.add("show");
+        document.getElementById("tripClose").onclick = closeTrip;
+        document.getElementById("tripRedo").onclick = () => { closeTrip(); openSheet(); };
+        panel.querySelectorAll(".tstop").forEach(el => {
+          el.onclick = () => {
+            const st = TRIP.stops[Number(el.dataset.i)];
+            map.flyTo([st.lat, st.lng], 15, { duration: .6 });
+            if (st._m) st._m.openPopup();
+          };
+        });
+      }
+
+      function sheetHTML() {
+        return `
+          <h2>✨ סוכן תכנון הטיולים</h2>
+          <p class="sub">תארו מה בא לכם — והסוכן יבנה מסלול מתוך המקומות שאספנו.<br><b>הדגמה:</b> כרגע מוחזר מסלול לדוגמה (סימולציה).</p>
+          <textarea class="trip-input" id="tripQuery">${esc(TRIP.query)}</textarea>
+          <div class="trip-chips" id="tripChips">
+            <button class="trip-chip on">☕ עגלת קפה</button>
+            <button class="trip-chip on">🏠 פעילות מקורה</button>
+            <button class="trip-chip">👨‍👩‍👧 עם ילדים</button>
+            <button class="trip-chip">🆓 בלי תשלום</button>
+            <button class="trip-chip">⏱️ חצי יום</button>
+          </div>
+          <button class="trip-go" id="tripGo">בנה לי מסלול ✨</button>
+          <button class="trip-cancel" id="tripCancel">ביטול</button>`;
+      }
+
+      function runThinking() {
+        const msgs = [
+          "מסנן 224 מקומות ברדיוס 5 ק״מ מנתניה…",
+          "מתאים לבקשה: עגלת קפה + פעילות מקורה…",
+          "בונה רצף עצירות לפי מרחקי נסיעה…",
+          "מסדר לוח זמנים לחצי יום…",
+        ];
+        sheet.innerHTML = `<h2>✨ בונה את המסלול…</h2>
+          <div class="trip-think"><div class="trip-spin"></div><div id="thinkTxt">${msgs[0]}</div></div>`;
+        const txt = document.getElementById("thinkTxt");
+        let i = 0;
+        const iv = setInterval(() => { i++; if (i < msgs.length) txt.textContent = msgs[i]; }, 600);
+        setTimeout(() => { clearInterval(iv); backdrop.classList.remove("show"); showTrip(); }, 2500);
+      }
+
+      function openSheet() {
+        sheet.innerHTML = sheetHTML();
+        backdrop.classList.add("show");
+        document.getElementById("tripCancel").onclick = () => backdrop.classList.remove("show");
+        document.getElementById("tripGo").onclick = runThinking;
+        document.getElementById("tripChips").querySelectorAll(".trip-chip").forEach(c =>
+          c.onclick = () => c.classList.toggle("on"));
+      }
+
+      backdrop.onclick = e => { if (e.target === backdrop) backdrop.classList.remove("show"); };
+      document.getElementById("fabPlan").onclick = openSheet;
+    })();
   </script>
 </body>
 </html>
