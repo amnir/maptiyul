@@ -406,7 +406,7 @@
     <!-- AI Trip Planner — hard-coded simulation -->
     <button id="fabPlan" class="fab-plan">
       <span class="spark">✨</span> תכנן לי טיול
-      <span class="sim">סימולציה</span>
+      <span class="sim">בטא</span>
     </button>
     <div id="tripBackdrop" class="trip-backdrop">
       <div class="trip-sheet" id="tripSheet"></div>
@@ -873,38 +873,149 @@
     //  what the LLM agent would generate from a geo+category prefilter.
     // ===================================================================
     (function () {
-      const TRIP = {
-        query: "תכנן לי חצי יום בנתניה עם עגלת קפה ופעילות מקורה",
-        title: "חצי יום בנתניה",
-        subtitle: "‏09:30–14:15 · כ-4.5 שעות · 4 עצירות · מתאים למשפחות",
-        intro: "סיננתי 224 מקומות ברדיוס 5 ק״מ מנתניה. פתחתי בעגלת קפה, שמרתי את הפעילות המקורה לשעת הצהריים החמה, וסידרתי את העצירות לפי מסלול נסיעה קצר לאורך מצוקי הים.",
-        stops: [
-          {
-            time: "09:30", dur: "30 דק׳", emoji: "☕", kind: "עגלת קפה",
-            title: "העגלה של גילי", lat: 32.3509, lng: 34.8766,
-            why: "פתיחת בוקר רגועה בעגלת קפה מקומית עם ישיבה בחוץ — בדיוק מה שביקשת.",
-            leg: { mode: "car", min: 7, km: 2.4 },
-          },
-          {
-            time: "10:15", dur: "60 דק׳", emoji: "🌊", kind: "טיילת ונוף",
-            title: "טיילות נתניה", lat: 32.3428, lng: 34.8533,
-            why: "טיילת מצוקי הכורכר מעל הים בשעת בוקר נעימה, לפני שמתחמם.",
-            leg: { mode: "walk", min: 22, km: 1.8 },
-          },
-          {
-            time: "11:30", dur: "45 דק׳", emoji: "🏖", kind: "חוף",
-            title: "חוף סירונית", lat: 32.3274, lng: 34.8481,
-            why: "ירידה במעלית המצוק לחוף — הפסקה קצרה על שפת הים.",
-            leg: { mode: "car", min: 6, km: 1.8 },
-          },
-          {
-            time: "12:45", dur: "90 דק׳", emoji: "🚀", kind: "פעילות מקורה",
-            title: "פלנתניה: מרכז מדע, חלל ותרבות יפן", lat: 32.3109, lng: 34.8480,
-            why: "הפעילות המקורה שביקשת — מרכז מדע אינטראקטיבי, מושלם לשעת הצהריים החמה (וגיבוי מצוין ליום גשום).",
-            leg: null,
-          },
-        ],
+      // Pilot scope: Netanya / Sharon (densest data). Deterministic, no backend.
+      const ANCHOR = { name: "נתניה / השרון", lat: 32.3215, lng: 34.8532 };
+      const RADIUS_KM = 12;
+      const TRIP_QUERY = "תכנן לי חצי יום בנתניה עם עגלת קפה ופעילות מקורה";
+      const CAT = {
+        coffee:     { emoji: "☕", kind: "עגלת קפה",       dur: 30 },
+        indoor:     { emoji: "🏛️", kind: "פעילות מקורה",   dur: 90 },
+        beach:      { emoji: "🌊", kind: "חוף וים",         dur: 60 },
+        nature:     { emoji: "🌳", kind: "טבע ונוף",        dur: 60 },
+        kids:       { emoji: "🎠", kind: "פעילות לילדים",   dur: 75 },
+        attraction: { emoji: "🎟️", kind: "אטרקציה",         dur: 60 },
       };
+      let TRIP = null; // populated by generatePlan()
+
+      function hav(a, b) {
+        const R = 6371, r = d => d * Math.PI / 180;
+        const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+        const s = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+        return 2 * R * Math.asin(Math.sqrt(s));
+      }
+      const round1 = x => Math.round(x * 10) / 10;
+      function fmt(m) {
+        m = Math.round(m);
+        const h = Math.floor(m / 60) % 24, mm = m % 60;
+        return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+      }
+      const richness = a => (a.image ? 2 : 0) + (a.description ? 1 : 0) + (a.address ? 1 : 0);
+
+      // The dataset carries the same place from several sources (near-identical
+      // coords). Collapse to ~110 m buckets, keeping the richest record.
+      function dedupe(arr) {
+        const by = {};
+        for (const a of arr) {
+          const k = a.lat.toFixed(3) + "," + a.lng.toFixed(3);
+          if (!by[k] || richness(a) > richness(by[k])) by[k] = a;
+        }
+        return Object.values(by);
+      }
+      const isFree = a => (a.types || []).includes("טיולים בחינם") || a.fee === "no";
+
+      // Coarse category inference from the existing types[]/keywords — no enrichment.
+      function classify(a) {
+        const types = a.types || [];
+        const hay = (a.title || "") + " " + (a.keywords || []).join(" ") + " " + types.join(" ");
+        const cats = [];
+        if (types.includes("עגלות קפה ופוד טראק")) cats.push("coffee");
+        if (/מוזיאון|מרכז מדע|מדע|משחקייה|אסקייפ|גלריה|מרכז מבקרים|פלנת|חלל המופלא|אורבניה/.test(hay)) cats.push("indoor");
+        if (types.includes("טיולי מים") || /חוף|טיילת/.test(hay)) cats.push("beach");
+        if (types.some(x => ["טיולי פריחה", "נקודות עניין בטבע", "שמורות טבע וגנים לאומיים", "נקודות תצפית", "פארקים לפיקניק", "מסלולי טיול"].includes(x))) cats.push("nature");
+        if (types.some(x => ["פארק שעשועים", "טיולים עם עגלות", "טיולים עם חיות"].includes(x)) || /טרמפולינ|ג'ימבו|פארק שעשוע/.test(hay)) cats.push("kids");
+        if (types.includes("אטרקציות")) cats.push("attraction");
+        return cats;
+      }
+      function whyFor(cat, i) {
+        if (cat === "coffee") return i === 0 ? "פתיחת בוקר רגועה בעגלת קפה מקומית." : "סגירה נחמדה עם קפה לפני הדרך.";
+        return ({
+          indoor: "פעילות מקורה לשעת הצהריים החמה — וגיבוי מצוין ליום גשום.",
+          beach: "אוויר ים והפסקה על שפת החוף.",
+          nature: "קצת ירוק ושקט בטבע.",
+          kids: "פעילות שהילדים יאהבו.",
+          attraction: "אטרקציה מקומית מומלצת באזור.",
+        })[cat] || "עצירה מומלצת באזור.";
+      }
+      function buildIntro(n, mh, missLabels) {
+        const wants = [];
+        if (mh.has("coffee")) wants.push("עגלת קפה");
+        if (mh.has("indoor")) wants.push("פעילות מקורה");
+        if (mh.has("kids")) wants.push("פעילות לילדים");
+        if (mh.has("free")) wants.push("כניסה חינם");
+        let s = `סיננתי ${n} מקומות ברדיוס ${RADIUS_KM} ק״מ מנתניה וסידרתי אותם לפי מרחקי נסיעה`;
+        if (wants.length) s += `, עם דגש על ${wants.join(", ")}`;
+        s += ".";
+        if (missLabels.length) s += ` (לא נמצאה ${missLabels.join(" ו")} מתאימה ברדיוס.)`;
+        return s;
+      }
+
+      // Build a real itinerary (same shape the UI already renders) from live data.
+      function generatePlan(opts) {
+        const mh = opts.mustHaves, duration = opts.duration;
+        const target = duration === "full" ? 6 : 4;
+        let cands = data.filter(a => hav(a, ANCHOR) <= RADIUS_KM);
+        cands = dedupe(cands);
+        if (mh.has("free")) cands = cands.filter(isFree);
+        if (!cands.length) return null;
+        cands.forEach(a => a._cats = classify(a));
+
+        const chosen = [], used = new Set(), missing = [];
+        function take(cat) {
+          const from = chosen.length ? chosen[chosen.length - 1].place : ANCHOR;
+          const pool = cands.filter(a => a._cats.includes(cat) && !used.has(a.id));
+          if (!pool.length) return null;
+          pool.sort((x, y) => hav(x, from) - hav(y, from));
+          const pick = pool[Math.floor(Math.random() * Math.min(3, pool.length))]; // top-N → variety on regenerate
+          used.add(pick.id);
+          return pick;
+        }
+        function push(token, requested) {
+          let order;
+          if (token === "__outdoor") order = ["beach", "nature", "attraction"];
+          else if (token === "__filler") order = ["nature", "attraction", "beach", "kids", "coffee"];
+          else order = [token];
+          // Diversify: push the previous stop's category to the back so fillers don't repeat.
+          const prev = chosen.length ? chosen[chosen.length - 1].cat : null;
+          if (order.length > 1 && prev) order = [...order.filter(c => c !== prev), ...order.filter(c => c === prev)];
+          let place = null, cat = null;
+          for (const c of order) { place = take(c); if (place) { cat = c; break; } }
+          if (place) chosen.push({ place, cat });
+          else if (requested) missing.push(token);
+          return !!place;
+        }
+
+        push("coffee");                          // signature opener
+        push("__outdoor");                       // morning outdoors
+        if (mh.has("indoor")) push("indoor", true); // midday heat refuge
+        if (mh.has("kids")) push("kids", true);
+        while (chosen.length < target) { if (!push("__filler")) break; }
+        if (chosen.length < 2) return null;
+
+        let t = 9 * 60 + 30; // 09:30 start
+        chosen.forEach((c, i) => {
+          c.time = fmt(t);
+          c.durMin = (CAT[c.cat] && CAT[c.cat].dur) || 60;
+          t += c.durMin;
+          if (i < chosen.length - 1) {
+            const km = hav(c.place, chosen[i + 1].place);
+            if (km < 1) { const m = Math.max(5, Math.round(km / 4.5 * 60)); c.leg = { mode: "walk", min: m, km: round1(km) }; t += m; }
+            else { const m = Math.max(4, Math.round(km / 40 * 60)); c.leg = { mode: "car", min: m, km: round1(km) }; t += m; }
+          }
+        });
+        const missLabels = missing.filter(x => CAT[x]).map(x => CAT[x].kind);
+
+        return {
+          candCount: cands.length,
+          title: duration === "full" ? "יום מלא בנתניה" : "חצי יום בנתניה",
+          subtitle: `‏${chosen[0].time}–${fmt(t)} · ${chosen.length} עצירות · ${ANCHOR.name}`,
+          intro: buildIntro(cands.length, mh, missLabels),
+          stops: chosen.map((c, i) => ({
+            time: c.time, dur: `${c.durMin} דק׳`, emoji: CAT[c.cat].emoji, kind: CAT[c.cat].kind,
+            title: c.place.title, lat: c.place.lat, lng: c.place.lng,
+            why: whyFor(c.cat, i), leg: c.leg || null,
+          })),
+        };
+      }
 
       const panel = document.getElementById("tripPanel");
       const backdrop = document.getElementById("tripBackdrop");
@@ -1054,32 +1165,61 @@
       function sheetHTML() {
         return `
           <h2>✨ סוכן תכנון הטיולים</h2>
-          <p class="sub">תארו מה בא לכם — והסוכן יבנה מסלול מתוך המקומות שאספנו.<br><b>הדגמה:</b> כרגע מוחזר מסלול לדוגמה (סימולציה).</p>
-          <textarea class="trip-input" id="tripQuery">${esc(TRIP.query)}</textarea>
+          <p class="sub">תארו מה בא לכם — והסוכן יבנה מסלול מתוך המקומות שאספנו.<br><b>אזור הניסוי:</b> נתניה והשרון.</p>
+          <textarea class="trip-input" id="tripQuery">${esc(TRIP_QUERY)}</textarea>
           <div class="trip-chips" id="tripChips">
-            <button class="trip-chip on">☕ עגלת קפה</button>
-            <button class="trip-chip on">🏠 פעילות מקורה</button>
-            <button class="trip-chip">👨‍👩‍👧 עם ילדים</button>
-            <button class="trip-chip">🆓 בלי תשלום</button>
-            <button class="trip-chip">⏱️ חצי יום</button>
+            <button class="trip-chip on" data-cat="coffee">☕ עגלת קפה</button>
+            <button class="trip-chip on" data-cat="indoor">🏛️ פעילות מקורה</button>
+            <button class="trip-chip" data-cat="kids">👨‍👩‍👧 עם ילדים</button>
+            <button class="trip-chip" data-cat="free">🆓 בלי תשלום</button>
+          </div>
+          <div class="trip-chips" id="tripDur">
+            <button class="trip-chip dur on" data-dur="half">⏱️ חצי יום</button>
+            <button class="trip-chip dur" data-dur="full">🌅 יום מלא</button>
           </div>
           <button class="trip-go" id="tripGo">בנה לי מסלול ✨</button>
           <button class="trip-cancel" id="tripCancel">ביטול</button>`;
       }
 
+      function readOpts() {
+        const mustHaves = new Set();
+        sheet.querySelectorAll("#tripChips .trip-chip.on").forEach(c => mustHaves.add(c.dataset.cat));
+        const durEl = sheet.querySelector("#tripDur .trip-chip.on");
+        return { mustHaves, duration: durEl ? durEl.dataset.dur : "half" };
+      }
+
+      // Light keyword sniff over the free-text box → pre-toggles chips ("it understood me").
+      function sniff(durBtns) {
+        const v = document.getElementById("tripQuery").value;
+        const re = { coffee: /קפה|עגל/, indoor: /מקור|מוזיאון|מדע|בפנים/, kids: /ילד|משפח/, free: /חינם|בלי תשלום/ };
+        sheet.querySelectorAll("#tripChips .trip-chip").forEach(c => {
+          const r = re[c.dataset.cat]; if (r) c.classList.toggle("on", r.test(v));
+        });
+        if (/יום מלא/.test(v)) durBtns.forEach(x => x.classList.toggle("on", x.dataset.dur === "full"));
+        else if (/חצי יום/.test(v)) durBtns.forEach(x => x.classList.toggle("on", x.dataset.dur === "half"));
+      }
+
       function runThinking() {
+        TRIP = generatePlan(readOpts());
+        if (!TRIP || TRIP.stops.length < 2) {
+          sheet.innerHTML = `<h2>הופס…</h2>
+            <p class="sub">לא הצלחתי לבנות מסלול עם הסינון הזה. נסו להוריד מסנן, או לבחור יום מלא.</p>
+            <button class="trip-cancel" id="tripCancel">סגור</button>`;
+          document.getElementById("tripCancel").onclick = () => backdrop.classList.remove("show");
+          return;
+        }
         const msgs = [
-          "מסנן 224 מקומות ברדיוס 5 ק״מ מנתניה…",
-          "מתאים לבקשה: עגלת קפה + פעילות מקורה…",
+          `מסנן ${TRIP.candCount} מקומות ברדיוס ${RADIUS_KM} ק״מ מנתניה…`,
+          "מתאים לבקשה שלך…",
           "בונה רצף עצירות לפי מרחקי נסיעה…",
-          "מסדר לוח זמנים לחצי יום…",
+          "מסדר לוח זמנים…",
         ];
         sheet.innerHTML = `<h2>✨ בונה את המסלול…</h2>
           <div class="trip-think"><div class="trip-spin"></div><div id="thinkTxt">${msgs[0]}</div></div>`;
         const txt = document.getElementById("thinkTxt");
         let i = 0;
-        const iv = setInterval(() => { i++; if (i < msgs.length) txt.textContent = msgs[i]; }, 600);
-        setTimeout(() => { clearInterval(iv); backdrop.classList.remove("show"); showTrip(); }, 2500);
+        const iv = setInterval(() => { i++; if (i < msgs.length) txt.textContent = msgs[i]; }, 480);
+        setTimeout(() => { clearInterval(iv); backdrop.classList.remove("show"); showTrip(); }, 2000);
       }
 
       function openSheet() {
@@ -1087,8 +1227,12 @@
         backdrop.classList.add("show");
         document.getElementById("tripCancel").onclick = () => backdrop.classList.remove("show");
         document.getElementById("tripGo").onclick = runThinking;
-        document.getElementById("tripChips").querySelectorAll(".trip-chip").forEach(c =>
+        sheet.querySelectorAll("#tripChips .trip-chip").forEach(c =>
           c.onclick = () => c.classList.toggle("on"));
+        const durBtns = [...sheet.querySelectorAll("#tripDur .trip-chip")];
+        durBtns.forEach(b => b.onclick = () => durBtns.forEach(x => x.classList.toggle("on", x === b)));
+        const q = document.getElementById("tripQuery");
+        if (q) q.oninput = () => sniff(durBtns);
       }
 
       backdrop.onclick = e => { if (e.target === backdrop) backdrop.classList.remove("show"); };
