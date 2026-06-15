@@ -229,7 +229,7 @@
         padding: 10px 14px; font-size: 14px; font-family: inherit; box-shadow: var(--shadow); cursor: pointer;
       }
     }
-    /* ===== AI Trip Planner (hard-coded simulation) ===== */
+    /* ===== AI Trip Planner (beta) ===== */
     .fab-plan {
       position: absolute; left: 50%; transform: translateX(-50%); bottom: 22px; z-index: 1200;
       display: inline-flex; align-items: center; gap: 9px; padding: 13px 22px;
@@ -403,7 +403,7 @@
       </div>
     </aside>
 
-    <!-- AI Trip Planner — hard-coded simulation -->
+    <!-- AI Trip Planner (beta) -->
     <button id="fabPlan" class="fab-plan">
       <span class="spark">✨</span> תכנן לי טיול
       <span class="sim">בטא</span>
@@ -866,11 +866,11 @@
     }
 
     // ===================================================================
-    //  AI Trip Planner — HARD-CODED SIMULATION
-    //  Demonstrates the UX of "plan me half a day around Netanya with a
-    //  coffee cart + indoor activity". Stops below are REAL pins from the
-    //  dataset; the plan/ordering/copy are hand-authored to stand in for
-    //  what the LLM agent would generate from a geo+category prefilter.
+    //  AI Trip Planner (beta) — deterministic, client-side, no backend.
+    //  Builds a half/full-day itinerary from real dataset pins via a
+    //  geo + coarse-category prefilter, greedy nearest-neighbor ordering,
+    //  and templated copy. Stands in for an LLM agent (a future /api/plan
+    //  swap) while staying 100% static. Pilot scope: Netanya / Sharon.
     // ===================================================================
     (function () {
       // Pilot scope: Netanya / Sharon (densest data). Deterministic, no backend.
@@ -1026,9 +1026,10 @@
         const s = TRIP.stops;
         const origin = `${s[0].lat},${s[0].lng}`;
         const dest = `${s[s.length - 1].lat},${s[s.length - 1].lng}`;
-        const wp = s.slice(1, -1).map(p => `${p.lat},${p.lng}`).join("|");
-        return `https://www.google.com/maps/dir/?api=1&origin=${origin}` +
-          `&destination=${dest}&waypoints=${encodeURIComponent(wp)}&travelmode=driving`;
+        const wp = s.slice(1, -1).map(p => `${p.lat},${p.lng}`);
+        let url = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${dest}&travelmode=driving`;
+        if (wp.length) url += `&waypoints=${encodeURIComponent(wp.join("|"))}`;
+        return url;
       }
 
       // Match a hand-authored stop back to the real dataset pin (for a rich popup).
