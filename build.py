@@ -309,6 +309,21 @@ def main():
         print(f"Wikipedia enrichment: {n_wiki} descriptions added "
               f"({n_skip} settlement-profile matches skipped)")
 
+    # Planning tags + duration (offline labels from enrich/tags.py), joined by
+    # the first source URL — the same stable id the frontend derives.
+    tags_fp = os.path.join(ENRICH_DIR, "tags.json")
+    if os.path.exists(tags_fp):
+        tagdata = json.load(open(tags_fp, encoding="utf-8"))
+        n_tag = 0
+        for p in merged:
+            url = p["sources"][0]["url"] if p.get("sources") else None
+            t = tagdata.get(url)
+            if t:
+                p["tags"] = t["tags"]
+                p["duration_min"] = t["duration_min"]
+                n_tag += 1
+        print(f"Tag enrichment: {n_tag}/{len(tagdata)} pilot places got tags + duration_min")
+
     # Derived accessibility flag: OSM wheelchair tag or a נגיש keyword/type.
     n_acc = 0
     for p in merged:

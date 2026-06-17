@@ -1073,17 +1073,27 @@
       }
       const isFree = a => (a.types || []).includes("טיולים בחינם") || a.fee === "no";
 
-      // Coarse category inference from the existing types[]/keywords — no enrichment.
+      // Category inference. Prefers real enrichment tags (data/enrichment/tags.json,
+      // merged in by build.py) when present; falls back to coarse types[]/keyword
+      // inference otherwise. coffee/attraction always come from the source types[].
       function classify(a) {
         const types = a.types || [];
-        const hay = (a.title || "") + " " + (a.keywords || []).join(" ") + " " + types.join(" ");
         const cats = [];
         if (types.includes("עגלות קפה ופוד טראק")) cats.push("coffee");
-        if (/מוזיאון|מרכז מדע|מדע|משחקייה|אסקייפ|גלריה|מרכז מבקרים|פלנת|חלל המופלא|אורבניה/.test(hay)) cats.push("indoor");
-        if (types.includes("טיולי מים") || /חוף|טיילת/.test(hay)) cats.push("beach");
-        if (types.some(x => ["טיולי פריחה", "נקודות עניין בטבע", "שמורות טבע וגנים לאומיים", "נקודות תצפית", "פארקים לפיקניק", "מסלולי טיול"].includes(x))) cats.push("nature");
-        if (types.some(x => ["פארק שעשועים", "טיולים עם עגלות", "טיולים עם חיות"].includes(x)) || /טרמפולינ|ג'ימבו|פארק שעשוע/.test(hay)) cats.push("kids");
         if (types.includes("אטרקציות")) cats.push("attraction");
+        const tags = a.tags;
+        if (tags) {
+          if (tags.includes("indoor")) cats.push("indoor");
+          if (tags.includes("beach")) cats.push("beach");
+          if (tags.includes("nature")) cats.push("nature");
+          if (tags.includes("kid-friendly")) cats.push("kids");
+        } else {
+          const hay = (a.title || "") + " " + (a.keywords || []).join(" ") + " " + types.join(" ");
+          if (/מוזיאון|מרכז מדע|מדע|משחקייה|אסקייפ|גלריה|מרכז מבקרים|פלנת|חלל המופלא|אורבניה/.test(hay)) cats.push("indoor");
+          if (types.includes("טיולי מים") || /חוף|טיילת/.test(hay)) cats.push("beach");
+          if (types.some(x => ["טיולי פריחה", "נקודות עניין בטבע", "שמורות טבע וגנים לאומיים", "נקודות תצפית", "פארקים לפיקניק", "מסלולי טיול"].includes(x))) cats.push("nature");
+          if (types.some(x => ["פארק שעשועים", "טיולים עם עגלות", "טיולים עם חיות"].includes(x)) || /טרמפולינ|ג'ימבו|פארק שעשוע/.test(hay)) cats.push("kids");
+        }
         return cats;
       }
       function whyFor(cat, i) {
@@ -1154,7 +1164,7 @@
         let t = 9 * 60 + 30; // 09:30 start
         chosen.forEach((c, i) => {
           c.time = fmt(t);
-          c.durMin = (CAT[c.cat] && CAT[c.cat].dur) || 60;
+          c.durMin = c.place.duration_min || (CAT[c.cat] && CAT[c.cat].dur) || 60;
           t += c.durMin;
           if (i < chosen.length - 1) {
             const km = hav(c.place, chosen[i + 1].place);
