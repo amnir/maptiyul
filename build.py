@@ -309,6 +309,23 @@ def main():
         print(f"Wikipedia enrichment: {n_wiki} descriptions added "
               f"({n_skip} settlement-profile matches skipped)")
 
+    # Planning tags + duration_min are STATE that lives directly in
+    # attractions.json (filled by enrich/tag_places.py / the tag-places skill).
+    # Carry them over from the previous build so a re-scrape never wipes them,
+    # joined by the first source URL (the stable id the frontend derives).
+    if os.path.exists(OUT_JSON):
+        prev = {p["sources"][0]["url"]: p
+                for p in json.load(open(OUT_JSON, encoding="utf-8")) if p.get("sources")}
+        n_keep = 0
+        for p in merged:
+            old = prev.get(p["sources"][0]["url"]) if p.get("sources") else None
+            if old and old.get("tags"):
+                p["tags"] = old["tags"]
+                if "duration_min" in old:
+                    p["duration_min"] = old["duration_min"]
+                n_keep += 1
+        print(f"Tags preserved from previous build: {n_keep} places")
+
     # Derived accessibility flag: OSM wheelchair tag or a נגיש keyword/type.
     n_acc = 0
     for p in merged:

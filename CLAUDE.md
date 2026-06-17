@@ -12,7 +12,7 @@ python3 build.py              # regenerate data/attractions.{json,js} after data
 
 ## Gotchas
 
-- **`data/attractions.{js,json}` are generated** — never hand-edit; change a scraper or `data/raw/*.json` and run `build.py`.
+- **`data/attractions.{js,json}` are generated** — never hand-edit; change a scraper or `data/raw/*.json` and run `build.py`. **Exception:** `tags`/`duration_min` are planning *state* held inline in `attractions.json` (filled by the `tag-places` skill / `enrich/tag_places.py`); `build.py` preserves them across rebuilds. `attractions.js` is always a generated mirror.
 - **Parse `data/attractions.json`, not `.js`** — `attractions.js` is `window.ATTRACTIONS = [...];` (JS assignment, not JSON; `JSON.parse` fails). Use the `.json` twin for programmatic reads.
 - **Duplicate places across sources** — the same spot appears from multiple sources at near-identical coords; dedupe by rounded coords (e.g. `lat.toFixed(3)`) when aggregating.
 - **Deploy = merge to `main`** → GitHub Pages at https://amnir.github.io/maptiyul/ (absolute OG/`og:url` point there). `main` is protected: push a branch + open a PR (`gh pr create`), direct pushes are rejected.
