@@ -322,7 +322,7 @@ def main():
                 p["tags"] = t["tags"]
                 p["duration_min"] = t["duration_min"]
                 n_tag += 1
-        print(f"Tag enrichment: {n_tag}/{len(tagdata)} pilot places got tags + duration_min")
+        print(f"Tag enrichment: {n_tag}/{len(tagdata)} places got planning tags + duration_min")
 
     # Derived accessibility flag: OSM wheelchair tag or a נגיש keyword/type.
     n_acc = 0

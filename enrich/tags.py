@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Build-time enrichment: assign planning `tags` (controlled vocabulary) and an
-estimated `duration_min` to the Netanya/Sharon pilot attractions.
+estimated `duration_min` to every attraction.
 
-This is the offline "labeling" step for the trip planner. Labels here were
-authored by hand (LLM-assisted) over the pilot set; the output is committed as
-data/enrichment/tags.json and merged into the dataset by build.py. A future pass
-can regenerate/extend this for more regions or via a runtime model — the schema
-stays the same.
+This is the offline "labeling" step for the trip planner. The Netanya/Sharon
+pilot (~113 places) is hand-curated (LLM-assisted, authoritative); every other
+place is rule-derived from types[]/keywords via rule_tags(). The output is
+committed as data/enrichment/tags.json and merged into the dataset by build.py.
+A future pass can replace the rule fallback with real per-place labels (e.g. a
+runtime model) — the schema stays the same.
 
 Output: data/enrichment/tags.json  ->  { "<source url>": {tags, duration_min, title} }
 
@@ -15,6 +16,7 @@ Run:  python3 enrich/tags.py
 import json
 import math
 import os
+import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -190,6 +192,69 @@ def build_pilot(arr):
     return sorted(by.values(), key=lambda a: a["title"])
 
 
+# ---------- rule-based fallback (for places outside the curated pilot) ----------
+COFFEE_TYPE = "עגלות קפה ופוד טראק"
+MUSEUM_TYPE = "מוזיאון, אתר מורשת, מרכז מבקרים ועתיקות"
+NATURE_TYPES = ["טיולי פריחה", "נקודות עניין בטבע", "שמורות טבע וגנים לאומיים",
+                "נקודות תצפית", "פארקים לפיקניק", "מסלולי טיול"]
+KIDS_TYPES = ["פארק שעשועים", "טיולים עם עגלות", "טיולים עם חיות"]
+
+# Indoor detector — encodes the per-name judgment from the pilot so it generalises
+# nationwide (the old JS regex was far narrower and missed e.g. "מרכז המבקרים").
+INDOOR_RE = re.compile(
+    r"מוזיאון|מרכז מדע|מדע וטכנולוגיה|מרכז מבקרים|מרכז המבקרים|משחקיי|משחקיה|"
+    r"אסקייפ|escape|חדר בריחה|חדרי בריחה|טרמפולינ|ג'ימבו|ג׳ימבו|באולינג|"
+    r"פלנטריום|פלנת|גלריה|לייזר|נינג'ה|נינג׳ה|אקווריום|מצפה כוכבים|"
+    r"חלל המופלא|אורבניה|בית הראשונים|יקב|קיר טיפוס|תיאטרון|סינמה|קולנוע")
+KIDS_RE = re.compile(r"טרמפולינ|ג'ימבו|ג׳ימבו|משחקיי|משחקיה|ילדים|משפח|שעשוע")
+BEACH_RE = re.compile(r"חוף|טיילת")
+
+
+def rule_tags(a):
+    """Derive (tags, duration_min) from types[]/keywords for a non-pilot place."""
+    types = a.get("types", [])
+    hay = (a.get("title", "") + " " + " ".join(a.get("keywords", [])) + " " + " ".join(types))
+    tags = set()
+    is_coffee = COFFEE_TYPE in types
+    is_indoor = MUSEUM_TYPE in types or bool(INDOOR_RE.search(hay))
+    is_beach = "טיולי מים" in types or bool(BEACH_RE.search(hay))
+    is_nature = any(t in types for t in NATURE_TYPES)
+    is_kids = any(t in types for t in KIDS_TYPES) or bool(KIDS_RE.search(hay))
+
+    if is_coffee:
+        tags |= {"outdoor", "food", "quick-stop"}
+    if is_indoor:
+        tags |= {"indoor", "rainy-day-ok"}
+    if is_beach and not is_indoor:
+        tags |= {"outdoor", "beach", "scenic"}
+    if is_nature and not is_indoor:
+        tags |= {"outdoor", "nature", "scenic"}
+    if "נקודות תצפית" in types:
+        tags |= {"outdoor", "scenic"}
+    if is_kids:
+        tags.add("kid-friendly")
+    # Plain attraction with no spatial signal → assume outdoor (coarse default).
+    if not is_indoor and not (tags & {"outdoor", "beach", "nature"}):
+        tags.add("outdoor")
+    # indoor wins any accidental outdoor/beach co-tag
+    if is_indoor:
+        tags -= {"outdoor", "beach"}
+
+    if is_coffee:
+        dur = 30
+    elif is_indoor:
+        dur = 90 if "kid-friendly" in tags else 75
+    elif is_beach:
+        dur = 60
+    elif is_kids:
+        dur = 75
+    elif "מסלולי טיול" in types:
+        dur = 90
+    else:
+        dur = 60
+    return sorted(tags & VOCAB), dur
+
+
 def main():
     arr = json.load(open(ATTRACTIONS, encoding="utf-8"))
     pilot = build_pilot(arr)
@@ -197,21 +262,34 @@ def main():
         raise SystemExit(f"Pilot set is {len(pilot)} places but DEC has {len(DEC)} labels — "
                          f"data changed; re-align enrich/tags.py before committing.")
 
-    out = {}
+    # Curated pilot labels are authoritative; everything else is rule-derived.
+    curated = {}
     for place, (tags, dur) in zip(pilot, DEC):
         bad = set(tags) - VOCAB
         if bad:
             raise SystemExit(f"Out-of-vocabulary tag(s) {bad} on {place['title']!r}")
-        url = place["sources"][0]["url"]
-        out[url] = {"tags": tags, "duration_min": dur, "title": place["title"]}
+        curated[place["sources"][0]["url"]] = (tags, dur)
+
+    out, n_rule = {}, 0
+    for a in arr:
+        if not a.get("sources"):
+            continue
+        url = a["sources"][0]["url"]
+        if url in curated:
+            tags, dur = curated[url]
+        else:
+            tags, dur = rule_tags(a)
+            n_rule += 1
+        if tags:
+            out[url] = {"tags": tags, "duration_min": dur, "title": a["title"]}
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
 
     indoor = sum(1 for v in out.values() if "indoor" in v["tags"])
-    print(f"Wrote {len(out)} labels -> {OUT}")
-    print(f"  indoor: {indoor} | outdoor: {len(out) - indoor}")
+    print(f"Wrote {len(out)} labels ({len(curated)} curated pilot, {n_rule} rule-based) -> {OUT}")
+    print(f"  indoor: {indoor} | outdoor: {sum(1 for v in out.values() if 'outdoor' in v['tags'])}")
 
 
 if __name__ == "__main__":
