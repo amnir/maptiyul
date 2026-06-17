@@ -309,20 +309,22 @@ def main():
         print(f"Wikipedia enrichment: {n_wiki} descriptions added "
               f"({n_skip} settlement-profile matches skipped)")
 
-    # Planning tags + duration (offline labels from enrich/tags.py), joined by
-    # the first source URL — the same stable id the frontend derives.
-    tags_fp = os.path.join(ENRICH_DIR, "tags.json")
-    if os.path.exists(tags_fp):
-        tagdata = json.load(open(tags_fp, encoding="utf-8"))
-        n_tag = 0
+    # Planning tags + duration_min are STATE that lives directly in
+    # attractions.json (filled by enrich/tag_places.py / the tag-places skill).
+    # Carry them over from the previous build so a re-scrape never wipes them,
+    # joined by the first source URL (the stable id the frontend derives).
+    if os.path.exists(OUT_JSON):
+        prev = {p["sources"][0]["url"]: p
+                for p in json.load(open(OUT_JSON, encoding="utf-8")) if p.get("sources")}
+        n_keep = 0
         for p in merged:
-            url = p["sources"][0]["url"] if p.get("sources") else None
-            t = tagdata.get(url)
-            if t:
-                p["tags"] = t["tags"]
-                p["duration_min"] = t["duration_min"]
-                n_tag += 1
-        print(f"Tag enrichment: {n_tag}/{len(tagdata)} places got planning tags + duration_min")
+            old = prev.get(p["sources"][0]["url"]) if p.get("sources") else None
+            if old and old.get("tags"):
+                p["tags"] = old["tags"]
+                if "duration_min" in old:
+                    p["duration_min"] = old["duration_min"]
+                n_keep += 1
+        print(f"Tags preserved from previous build: {n_keep} places")
 
     # Derived accessibility flag: OSM wheelchair tag or a נגיש keyword/type.
     n_acc = 0
