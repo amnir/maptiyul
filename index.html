@@ -83,6 +83,13 @@
       background: var(--glass-strong);
     }
     .search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31,122,140,.12); }
+    .typesearch { margin-top: 8px; font-size: 13px; padding: 8px 11px; }
+
+    .resetall { width: 100%; margin-top: 10px; padding: 9px; border: 1px solid var(--line);
+      background: #fff; border-radius: 10px; font-family: inherit; font-size: 13px; cursor: pointer; color: var(--muted); }
+    .resetall:hover { background: #f4f7f9; }
+
+    .type-row.hide { display: none; }
 
     .group { margin-top: 18px; }
     .group h2 {
@@ -390,6 +397,8 @@
         <button id="listToggle" class="listtoggle">📋 הצג רשימת תוצאות</button>
         <div id="resultsList" class="results"></div>
 
+        <button id="resetAll" class="resetall">↺ אפס את כל הסינונים</button>
+
         <div class="group">
           <h2>אזור</h2>
           <div class="pills" id="regions"></div>
@@ -406,6 +415,7 @@
             <button class="btn" id="allTypes">הכל</button>
             <button class="btn" id="noTypes">נקה</button>
           </div>
+          <input id="typeSearch" class="search typesearch" type="search" placeholder="סינון רשימת הסוגים…" />
           <div class="types" id="types" style="margin-top:8px"></div>
         </div>
       </div>
@@ -571,18 +581,43 @@
 
     const typesEl = document.getElementById("types");
     const typeInputs = {};
+    const typeRows = {};
     allTypes.forEach(t => {
       const row = document.createElement("label");
       row.className = "type-row";
       row.innerHTML = `<input type="checkbox" checked /><span>${t}</span><span class="c">${typeCounts[t]}</span>`;
       const cb = row.querySelector("input");
       typeInputs[t] = cb;
+      typeRows[t] = row;
       cb.onchange = () => {
         if (cb.checked) state.types.add(t); else state.types.delete(t);
         render();
       };
       typesEl.appendChild(row);
     });
+
+    // Narrow the (long) type list without touching which types are selected.
+    document.getElementById("typeSearch").addEventListener("input", e => {
+      const q = e.target.value.trim().toLowerCase();
+      allTypes.forEach(t => typeRows[t].classList.toggle("hide", q && !t.toLowerCase().includes(q)));
+    });
+
+    document.getElementById("resetAll").onclick = () => {
+      state.regions = new Set(regions);
+      state.sources = new Set(sources);
+      state.types = new Set(allTypes);
+      state.q = "";
+      state.radiusKm = 0;
+      state.favOnly = false;
+      document.getElementById("search").value = "";
+      document.getElementById("typeSearch").value = "";
+      allTypes.forEach(t => { typeInputs[t].checked = true; typeRows[t].classList.remove("hide"); });
+      Object.values(regionPills).forEach(el => el.classList.add("active"));
+      Object.values(sourcePills).forEach(el => el.classList.add("active"));
+      document.getElementById("radius").value = "0";
+      document.getElementById("favToggle").classList.remove("active");
+      render();
+    };
 
     document.getElementById("search").addEventListener("input", e => {
       state.q = e.target.value.trim().toLowerCase();
