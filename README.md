@@ -141,3 +141,44 @@ up the new source filter automatically.
   the entrance and another the town centroid.
 - **Region** uses each source's own tags when present, otherwise latitude bands
   (with a Jerusalem bounding box).
+
+## Trip planner (LLM backend)
+
+The "סוכן תכנון הטיולים" planner has two modes. By default it runs the deterministic,
+client-side generator in `index.html` (no backend, works on GitHub Pages as-is). If a
+Supabase Edge Function is configured, it instead asks a real model to select and order
+the stops, falling back to the deterministic generator on any error — so the feature
+never hard-breaks.
+
+The model layer is **vendor-agnostic**: the function talks to any OpenAI-compatible
+`/v1/chat/completions` endpoint (NVIDIA NIM, Groq, OpenRouter, Together, local Ollama…)
+via three env vars — swap the provider with no code change.
+
+**What's committed vs. secret** (this repo is public):
+
+- *Committed:* the function code (`supabase/functions/plan/index.ts`), the client glue
+  in `index.html`, the Supabase **project URL + anon key** (public by design — the anon
+  key is meant to ship in the frontend), and `supabase/functions/plan/.env.example`
+  (names only).
+- *Never committed:* the real `LLM_API_KEY` and the Supabase `service_role` key. These
+  live only as Supabase secrets. `.env` is gitignored.
+
+**Setup** (one-time, all manual — needs a free Supabase project and a model provider):
+
+```bash
+supabase login
+supabase init                     # if supabase/config.toml doesn't exist yet
+supabase link --project-ref <ref> # from your Supabase project's dashboard URL
+
+# set the provider secrets (real values, never committed):
+cp supabase/functions/plan/.env.example supabase/functions/plan/.env
+# edit .env → LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
+supabase secrets set --env-file supabase/functions/plan/.env
+
+supabase functions deploy plan    # deploys the Edge Function
+```
+
+Then paste your project URL and anon key into `SUPABASE_URL` / `SUPABASE_ANON_KEY`
+near the top of the trip-planner IIFE in `index.html`. Leaving them blank keeps the
+deterministic planner. The endpoint is currently open (anon key only); add rate
+limiting before relying on a paid provider.

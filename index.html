@@ -1080,7 +1080,19 @@
         kids:       { emoji: "🎠", kind: "פעילות לילדים",   dur: 75 },
         attraction: { emoji: "🎟️", kind: "אטרקציה",         dur: 60 },
       };
-      let TRIP = null; // populated by generatePlan()
+
+      // --- LLM backend (Supabase Edge Function) --------------------------------
+      // PUBLIC BY DESIGN: the anon key is safe to commit — data is guarded by the
+      // function and (future) row-level security, not by hiding this key. The real
+      // LLM/service keys live ONLY in the Supabase dashboard, never in this repo.
+      // Until these are filled the planner falls back to the deterministic
+      // generatePlan() below, so the site works unchanged out of the box.
+      const SUPABASE_URL = "";       // e.g. https://<project-ref>.supabase.co
+      const SUPABASE_ANON_KEY = "";  // Supabase → Project Settings → API → anon/public key
+      const PLAN_ENDPOINT = (SUPABASE_URL && SUPABASE_ANON_KEY)
+        ? `${SUPABASE_URL}/functions/v1/plan` : null;
+
+      let TRIP = null; // populated by generatePlan() / generatePlanLLM()
 
       function hav(a, b) {
         const R = 6371, r = d => d * Math.PI / 180;
@@ -1196,10 +1208,22 @@
         while (chosen.length < target) { if (!push("__filler")) break; }
         if (chosen.length < 2) return null;
 
+        const missLabels = missing.filter(x => CAT[x]).map(x => CAT[x].kind);
+        return assemblePlan(chosen, opts, {
+          candCount: cands.length,
+          intro: buildIntro(cands.length, mh, missLabels),
+        });
+      }
+
+      // Compute times, legs, durations and the render-ready stop shape from an
+      // ordered [{ place, cat, why?, durMin? }] list. Shared by the deterministic
+      // planner and the LLM planner so both feed the UI identical input.
+      function assemblePlan(chosen, opts, meta) {
+        meta = meta || {};
         let t = 9 * 60 + 30; // 09:30 start
         chosen.forEach((c, i) => {
           c.time = fmt(t);
-          c.durMin = c.place.duration_min || (CAT[c.cat] && CAT[c.cat].dur) || 60;
+          c.durMin = c.durMin || c.place.duration_min || (CAT[c.cat] && CAT[c.cat].dur) || 60;
           t += c.durMin;
           if (i < chosen.length - 1) {
             const km = hav(c.place, chosen[i + 1].place);
@@ -1207,19 +1231,69 @@
             else { const m = Math.max(4, Math.round(km / 40 * 60)); c.leg = { mode: "car", min: m, km: round1(km) }; t += m; }
           }
         });
-        const missLabels = missing.filter(x => CAT[x]).map(x => CAT[x].kind);
-
+        const duration = opts.duration;
         return {
-          candCount: cands.length,
-          title: duration === "full" ? "יום מלא בנתניה" : "חצי יום בנתניה",
+          candCount: meta.candCount || chosen.length,
+          title: meta.title || (duration === "full" ? "יום מלא בנתניה" : "חצי יום בנתניה"),
           subtitle: `‏${chosen[0].time}–${fmt(t)} · ${chosen.length} עצירות · ${ANCHOR.name}`,
-          intro: buildIntro(cands.length, mh, missLabels),
+          intro: meta.intro || "",
           stops: chosen.map((c, i) => ({
-            time: c.time, dur: `${c.durMin} דק׳`, emoji: CAT[c.cat].emoji, kind: CAT[c.cat].kind,
+            time: c.time, dur: `${c.durMin} דק׳`,
+            emoji: (CAT[c.cat] || CAT.attraction).emoji,
+            kind: (CAT[c.cat] || CAT.attraction).kind,
             title: c.place.title, lat: c.place.lat, lng: c.place.lng,
-            why: whyFor(c.cat, i), leg: c.leg || null,
+            why: c.why || whyFor(c.cat, i), leg: c.leg || null,
           })),
         };
+      }
+
+      // LLM planner: prefilter candidates client-side (reusing the dataset already
+      // in memory), let the Edge Function pick/order them, then assemble locally.
+      // Returns a plan in the same shape as generatePlan(), or throws to fall back.
+      async function generatePlanLLM(opts, query) {
+        if (!PLAN_ENDPOINT) return null; // backend not configured → use deterministic
+        const mh = opts.mustHaves;
+        let cands = data.filter(a => hav(a, ANCHOR) <= RADIUS_KM);
+        cands = dedupe(cands);
+        if (mh.has("free")) cands = cands.filter(isFree);
+        if (cands.length < 2) return null;
+        cands.forEach(a => a._cats = classify(a));
+        // Send only the nearest ~60, indexed, so the model picks by index (no
+        // coordinate hallucination) and the prompt stays small.
+        const pool = cands.slice().sort((a, b) => hav(a, ANCHOR) - hav(b, ANCHOR)).slice(0, 60);
+
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 20000);
+        let out;
+        try {
+          const res = await fetch(PLAN_ENDPOINT, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
+            signal: ctrl.signal,
+            body: JSON.stringify({
+              query: query || "",
+              duration: opts.duration,
+              mustHaves: [...mh],
+              candidates: pool.map((a, i) => ({ i, title: a.title, lat: a.lat, lng: a.lng, cats: a._cats })),
+            }),
+          });
+          if (!res.ok) throw new Error("plan endpoint " + res.status);
+          out = await res.json();
+        } finally {
+          clearTimeout(to);
+        }
+        if (!out || !Array.isArray(out.stops)) throw new Error("bad plan payload");
+
+        const seen = new Set(), chosen = [];
+        for (const s of out.stops) {
+          const place = pool[s.i];
+          if (!place || seen.has(s.i)) continue;
+          seen.add(s.i);
+          const cat = CAT[s.cat] ? s.cat : (place._cats[0] || "attraction");
+          chosen.push({ place, cat, why: s.why, durMin: s.dur });
+        }
+        if (chosen.length < 2) throw new Error("no resolvable stops");
+        return assemblePlan(chosen, opts, { candCount: cands.length, title: out.title, intro: out.intro });
       }
 
       const panel = document.getElementById("tripPanel");
@@ -1345,7 +1419,7 @@
             <p class="ttl">✨ ${esc(TRIP.title)}</p>
             <div class="meta">${esc(TRIP.subtitle)}</div>
           </div>
-          <div class="trip-intro"><span class="ai">✨</span><span>${esc(TRIP.intro)}</span></div>
+          <div class="trip-intro"><span class="ai">✨</span><span>${esc(TRIP.intro)}${TRIP._fallback ? " · (מסלול מקומי — הסוכן החכם לא היה זמין)" : ""}</span></div>
           <div class="trip-body">${stops}</div>
           <div class="trip-actions">
             <a class="nav" href="${gmapsUrl()}" target="_blank" rel="noopener">🧭 פתח את כל המסלול ב-Google Maps</a>
@@ -1405,27 +1479,47 @@
         else if (/חצי יום/.test(v)) durBtns.forEach(x => x.classList.toggle("on", x.dataset.dur === "half"));
       }
 
-      function runThinking() {
-        TRIP = generatePlan(readOpts());
-        if (!TRIP || TRIP.stops.length < 2) {
+      async function runThinking() {
+        const opts = readOpts();
+        const query = (document.getElementById("tripQuery") || {}).value || "";
+
+        // Thinking UI shows immediately; messages cycle while we await the model.
+        const msgs = [
+          "קורא את הבקשה שלך…",
+          "סורק מקומות באזור…",
+          "בונה רצף עצירות…",
+          "מסדר לוח זמנים…",
+        ];
+        sheet.innerHTML = `<h2>✨ בונה את המסלול…</h2>
+          <div class="trip-think"><div class="trip-spin"></div><div id="thinkTxt">${esc(msgs[0])}</div></div>`;
+        const txt = document.getElementById("thinkTxt");
+        let i = 0;
+        const iv = setInterval(() => { i++; if (i < msgs.length) txt.textContent = msgs[i]; }, 700);
+        const minWait = new Promise(r => setTimeout(r, 1200)); // avoid a jarring flash
+
+        let plan = null, fallback = false;
+        try {
+          plan = await generatePlanLLM(opts, query);
+        } catch (e) {
+          console.warn("LLM planner failed, using deterministic fallback:", e);
+        }
+        if (!plan || plan.stops.length < 2) { plan = generatePlan(opts); fallback = true; }
+
+        await minWait;
+        clearInterval(iv);
+
+        if (!plan || plan.stops.length < 2) {
           sheet.innerHTML = `<h2>הופס…</h2>
             <p class="sub">לא הצלחתי לבנות מסלול עם הסינון הזה. נסו להוריד מסנן, או לבחור יום מלא.</p>
             <button class="trip-cancel" id="tripCancel">סגור</button>`;
           document.getElementById("tripCancel").onclick = () => backdrop.classList.remove("show");
           return;
         }
-        const msgs = [
-          `מסנן ${TRIP.candCount} מקומות ברדיוס ${RADIUS_KM} ק״מ מנתניה…`,
-          "מתאים לבקשה שלך…",
-          "בונה רצף עצירות לפי מרחקי נסיעה…",
-          "מסדר לוח זמנים…",
-        ];
-        sheet.innerHTML = `<h2>✨ בונה את המסלול…</h2>
-          <div class="trip-think"><div class="trip-spin"></div><div id="thinkTxt">${msgs[0]}</div></div>`;
-        const txt = document.getElementById("thinkTxt");
-        let i = 0;
-        const iv = setInterval(() => { i++; if (i < msgs.length) txt.textContent = msgs[i]; }, 480);
-        setTimeout(() => { clearInterval(iv); backdrop.classList.remove("show"); showTrip(); }, 2000);
+        TRIP = plan;
+        // Only flag "local route" when a backend was configured but didn't answer.
+        TRIP._fallback = fallback && !!PLAN_ENDPOINT;
+        backdrop.classList.remove("show");
+        showTrip();
       }
 
       function openSheet() {
