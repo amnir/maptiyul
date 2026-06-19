@@ -68,9 +68,13 @@ Deno.serve(async (req) => {
     list,
   ].join("\n");
 
+  // Accept LLM_BASE_URL as the /v1 root OR with /chat/completions already on it.
+  const root = base.replace(/\/+$/, "");
+  const endpoint = /\/chat\/completions$/.test(root) ? root : `${root}/chat/completions`;
+
   let res: Response;
   try {
-    res = await fetch(`${base.replace(/\/$/, "")}/chat/completions`, {
+    res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({

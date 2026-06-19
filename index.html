@@ -1081,14 +1081,8 @@
         attraction: { emoji: "🎟️", kind: "אטרקציה",         dur: 60 },
       };
 
-      // --- LLM backend (Supabase Edge Function) --------------------------------
-      // PUBLIC BY DESIGN: the anon key is safe to commit — data is guarded by the
-      // function and (future) row-level security, not by hiding this key. The real
-      // LLM/service keys live ONLY in the Supabase dashboard, never in this repo.
-      // Until these are filled the planner falls back to the deterministic
-      // generatePlan() below, so the site works unchanged out of the box.
-      const SUPABASE_URL = "";       // e.g. https://<project-ref>.supabase.co
-      const SUPABASE_ANON_KEY = "";  // Supabase → Project Settings → API → anon/public key
+      const SUPABASE_URL = "https://nheqsbigambzsmcdokeu.supabase.co";
+      const SUPABASE_ANON_KEY = "sb_publishable_u39cjtkuIuA_PLAcProTTw_zKYUgZRn";
       const PLAN_ENDPOINT = (SUPABASE_URL && SUPABASE_ANON_KEY)
         ? `${SUPABASE_URL}/functions/v1/plan` : null;
 
