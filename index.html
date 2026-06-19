@@ -1071,7 +1071,7 @@
       // Pilot scope: Netanya / Sharon (densest data). Deterministic, no backend.
       const ANCHOR = { name: "נתניה / השרון", lat: 32.3215, lng: 34.8532 };
       const RADIUS_KM = 12;
-      const TRIP_QUERY = "תכנן לי חצי יום בנתניה עם עגלת קפה ופעילות מקורה";
+      const TRIP_QUERY = "אני מרמת גן, רוצה טיול חצי יום בשרון";
       const CAT = {
         coffee:     { emoji: "☕", kind: "עגלת קפה",       dur: 30 },
         indoor:     { emoji: "🏛️", kind: "פעילות מקורה",   dur: 90 },
@@ -1229,7 +1229,7 @@
         return {
           candCount: meta.candCount || chosen.length,
           title: meta.title || (duration === "full" ? "יום מלא בנתניה" : "חצי יום בנתניה"),
-          subtitle: `‏${chosen[0].time}–${fmt(t)} · ${chosen.length} עצירות · ${ANCHOR.name}`,
+          subtitle: `‏${chosen[0].time}–${fmt(t)} · ${chosen.length} עצירות · ${meta.areaLabel || ANCHOR.name}`,
           intro: meta.intro || "",
           stops: chosen.map((c, i) => ({
             time: c.time, dur: `${c.durMin} דק׳`,
@@ -1241,53 +1241,40 @@
         };
       }
 
-      // LLM planner: prefilter candidates client-side (reusing the dataset already
-      // in memory), let the Edge Function pick/order them, then assemble locally.
-      // Returns a plan in the same shape as generatePlan(), or throws to fall back.
+      // LLM planner: the Edge Function owns the dataset and does the work — it
+      // parses the free text (origin + area), filters to the area, selects stops
+      // and orders them by travel direction. The client just sends the text and
+      // assembles timing/legs from the returned real pins. Throws to fall back.
       async function generatePlanLLM(opts, query) {
-        if (!PLAN_ENDPOINT) return null; // backend not configured → use deterministic
-        const mh = opts.mustHaves;
-        let cands = data.filter(a => hav(a, ANCHOR) <= RADIUS_KM);
-        cands = dedupe(cands);
-        if (mh.has("free")) cands = cands.filter(isFree);
-        if (cands.length < 2) return null;
-        cands.forEach(a => a._cats = classify(a));
-        // Send only the nearest ~60, indexed, so the model picks by index (no
-        // coordinate hallucination) and the prompt stays small.
-        const pool = cands.slice().sort((a, b) => hav(a, ANCHOR) - hav(b, ANCHOR)).slice(0, 60);
+        if (!PLAN_ENDPOINT) return null;        // backend not configured → deterministic
+        if (!query || !query.trim()) return null; // free text is required for the agent
 
         const ctrl = new AbortController();
-        const to = setTimeout(() => ctrl.abort(), 20000);
+        const to = setTimeout(() => ctrl.abort(), 30000); // two model calls → allow time
         let out;
         try {
           const res = await fetch(PLAN_ENDPOINT, {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
             signal: ctrl.signal,
-            body: JSON.stringify({
-              query: query || "",
-              duration: opts.duration,
-              mustHaves: [...mh],
-              candidates: pool.map((a, i) => ({ i, title: a.title, lat: a.lat, lng: a.lng, cats: a._cats })),
-            }),
+            body: JSON.stringify({ query, duration: opts.duration, prefs: [...opts.mustHaves] }),
           });
           if (!res.ok) throw new Error("plan endpoint " + res.status);
           out = await res.json();
         } finally {
           clearTimeout(to);
         }
-        if (!out || !Array.isArray(out.stops)) throw new Error("bad plan payload");
+        if (!out || !Array.isArray(out.stops) || out.stops.length < 2) throw new Error("bad plan payload");
 
-        const seen = new Set(), chosen = [];
-        for (const s of out.stops) {
-          const place = pool[s.i];
-          if (!place || seen.has(s.i)) continue;
-          seen.add(s.i);
-          const cat = CAT[s.cat] ? s.cat : (place._cats[0] || "attraction");
-          chosen.push({ place, cat, why: s.why, durMin: s.dur });
-        }
-        if (chosen.length < 2) throw new Error("no resolvable stops");
-        return assemblePlan(chosen, opts, { candCount: cands.length, title: out.title, intro: out.intro });
+        // Stops are real, directionally-ordered pins; assemble timing/legs locally.
+        const chosen = out.stops.map(s => ({
+          place: { title: s.title, lat: s.lat, lng: s.lng },
+          cat: CAT[s.cat] ? s.cat : "attraction",
+          why: s.why, durMin: s.durMin,
+        }));
+        return assemblePlan(chosen, opts, {
+          candCount: out.stops.length, title: out.title, intro: out.intro, areaLabel: out.area,
+        });
       }
 
       const panel = document.getElementById("tripPanel");
@@ -1439,7 +1426,7 @@
       function sheetHTML() {
         return `
           <h2>✨ סוכן תכנון הטיולים</h2>
-          <p class="sub">תארו מה בא לכם — והסוכן יבנה מסלול מתוך המקומות שאספנו.<br><b>אזור הניסוי:</b> נתניה והשרון.</p>
+          <p class="sub">תארו מאיפה אתם יוצאים ולאן בא לכם לטייל — והסוכן יבנה מסלול אמיתי.<br>למשל: ״אני מרמת גן, רוצה טיול חצי יום בשרון״.</p>
           <textarea class="trip-input" id="tripQuery">${esc(TRIP_QUERY)}</textarea>
           <div class="trip-chips" id="tripChips">
             <button class="trip-chip on" data-cat="coffee">☕ עגלת קפה</button>

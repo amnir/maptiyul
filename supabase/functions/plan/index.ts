@@ -1,24 +1,124 @@
-// Vendor-agnostic LLM trip-planner proxy (Supabase Edge Function, Deno).
+// Vendor-agnostic LLM trip-planner agent (Supabase Edge Function, Deno).
 //
-// Reads provider config from environment ONLY (never committed):
-//   LLM_BASE_URL  OpenAI-compatible /v1 root, e.g. https://integrate.api.nvidia.com/v1
-//   LLM_API_KEY   provider key (set via `supabase secrets set`)
-//   LLM_MODEL     model id string for the chosen provider
+// The function owns the dataset and a two-step pipeline:
+//   A) parse the free-text request -> { origin, area, duration, prefs } using the
+//      model's own knowledge of Israeli geography for coordinates.
+//   B) select & order stops from area-filtered candidates + write Hebrew copy.
+// Geometry is deterministic: candidates are filtered to the area, and the chosen
+// stops are ordered by projection onto the origin->area axis (so a trip starting
+// south of the area runs south->north, and vice-versa). The model handles
+// understanding, selection, and copy; it never sees coordinates it can hallucinate
+// into the route (stops are resolved back to real pins by index).
 //
-// The client sends a compact, pre-filtered candidate list; the model selects and
-// orders stops BY INDEX (so it cannot invent coordinates) and writes Hebrew copy.
-// Response shape consumed by index.html:
-//   { title, intro, stops: [{ i, cat, why, dur }] }
-// No dataset and no secrets live here — this is a stateless proxy.
+// Returns directionally-ordered REAL stops; the client computes times/legs/emoji
+// and renders. Env (secrets only): LLM_BASE_URL (/v1 root), LLM_API_KEY, LLM_MODEL.
+// Dataset is fetched (warm-cached) from the published site — no DB, no secrets here.
 
 const cors = {
-  "Access-Control-Allow-Origin": "*", // public, no-credential endpoint; tighten if needed
+  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Must match the CAT keys in index.html.
 const CATS = ["coffee", "indoor", "beach", "nature", "kids", "attraction"];
+const PREF_TOKENS = [...CATS, "free"];
+const DATA_URL = "https://amnir.github.io/maptiyul/data/attractions.json";
+
+type Place = {
+  title: string; lat: number; lng: number;
+  types?: string[]; tags?: string[]; keywords?: string[];
+  fee?: string; image?: string; description?: string; address?: string; duration_min?: number;
+  _cats?: string[];
+};
+type LatLng = { lat: number; lng: number };
+
+// ---- dataset (warm in-memory cache) ----------------------------------------
+let DATA: Place[] | null = null;
+let DATA_AT = 0;
+async function getData(): Promise<Place[]> {
+  if (DATA && Date.now() - DATA_AT < 3_600_000) return DATA;
+  const r = await fetch(DATA_URL);
+  if (!r.ok) throw new Error("dataset fetch " + r.status);
+  const j = await r.json();
+  DATA = (Array.isArray(j) ? j : []).filter((a: any) => a && a.lat && a.lng);
+  DATA_AT = Date.now();
+  return DATA!;
+}
+
+// ---- geo + classify (ported from index.html, kept in sync) -----------------
+function hav(a: LatLng, b: LatLng): number {
+  const R = 6371, r = (d: number) => d * Math.PI / 180;
+  const dLat = r(b.lat - a.lat), dLng = r(b.lng - a.lng);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+const richness = (a: Place) => (a.image ? 2 : 0) + (a.description ? 1 : 0) + (a.address ? 1 : 0);
+function dedupe(arr: Place[]): Place[] {
+  const by: Record<string, Place> = {};
+  for (const a of arr) {
+    const k = a.lat.toFixed(3) + "," + a.lng.toFixed(3);
+    if (!by[k] || richness(a) > richness(by[k])) by[k] = a;
+  }
+  return Object.values(by);
+}
+const isFree = (a: Place) => (a.types || []).includes("טיולים בחינם") || a.fee === "no";
+function classify(a: Place): string[] {
+  const types = a.types || [];
+  const cats: string[] = [];
+  if (types.includes("עגלות קפה ופוד טראק")) cats.push("coffee");
+  if (types.includes("אטרקציות")) cats.push("attraction");
+  const tags = a.tags;
+  if (tags && tags.length) {
+    if (tags.includes("indoor")) cats.push("indoor");
+    if (tags.includes("beach")) cats.push("beach");
+    if (tags.includes("nature")) cats.push("nature");
+    if (tags.includes("kid-friendly")) cats.push("kids");
+  } else {
+    const hay = (a.title || "") + " " + (a.keywords || []).join(" ") + " " + types.join(" ");
+    if (/מוזיאון|מרכז מדע|מדע|משחקייה|אסקייפ|גלריה|מרכז מבקרים|פלנת|חלל המופלא|אורבניה/.test(hay)) cats.push("indoor");
+    if (types.includes("טיולי מים") || /חוף|טיילת/.test(hay)) cats.push("beach");
+    if (types.some((x) => ["טיולי פריחה", "נקודות עניין בטבע", "שמורות טבע וגנים לאומיים", "נקודות תצפית", "פארקים לפיקניק", "מסלולי טיול"].includes(x))) cats.push("nature");
+    if (types.some((x) => ["פארק שעשועים", "טיולים עם עגלות", "טיולים עם חיות"].includes(x)) || /טרמפולינ|ג'ימבו|פארק שעשוע/.test(hay)) cats.push("kids");
+  }
+  return cats;
+}
+
+// Order stops by progress along the origin->area axis (falls back to south->north).
+function orderByDirection(stops: Place[], origin: LatLng | null, area: LatLng): Place[] {
+  if (origin && isFinite(origin.lat) && isFinite(origin.lng)) {
+    const dx = area.lng - origin.lng, dy = area.lat - origin.lat;
+    const len = Math.hypot(dx, dy) || 1;
+    const proj = (p: LatLng) => ((p.lng - origin.lng) * dx + (p.lat - origin.lat) * dy) / len;
+    return stops.slice().sort((a, b) => proj(a) - proj(b));
+  }
+  return stops.slice().sort((a, b) => a.lat - b.lat); // south -> north default
+}
+
+// ---- model plumbing --------------------------------------------------------
+function endpointFor(base: string): string {
+  const root = base.replace(/\/+$/, "");
+  return /\/chat\/completions$/.test(root) ? root : `${root}/chat/completions`;
+}
+async function callModel(endpoint: string, key: string, model: string, system: string, user: string, maxTokens: number): Promise<any> {
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "system", content: system }, { role: "user", content: user }],
+      temperature: 0.5,
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!res.ok) throw new Error(`provider ${res.status}: ${await safeText(res)}`);
+  const data = await res.json().catch(() => null);
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string") throw new Error("empty completion");
+  const obj = parseJson(content);
+  if (!obj) throw new Error("unparseable: " + content.slice(0, 200));
+  return obj;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -28,128 +128,116 @@ Deno.serve(async (req) => {
   const key = Deno.env.get("LLM_API_KEY");
   const model = Deno.env.get("LLM_MODEL");
   if (!base || !key || !model) return json({ error: "LLM env not configured" }, 500);
+  const endpoint = endpointFor(base);
 
   let body: any;
+  try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
+  const query: string = typeof body?.query === "string" ? body.query.slice(0, 500) : "";
+  const durationHint: string = body?.duration === "full" ? "full" : "half";
+  const clientPrefs: string[] = Array.isArray(body?.prefs) ? body.prefs : [];
+  if (!query.trim()) return json({ error: "empty query" }, 400);
+
   try {
-    body = await req.json();
-  } catch {
-    return json({ error: "bad json" }, 400);
-  }
+    // --- Call A: understand the request -----------------------------------
+    const intentSys = [
+      "You convert a trip request (Hebrew or English) into JSON, using your knowledge of Israeli geography for WGS84 coordinates.",
+      "Output STRICT JSON only — no prose, no markdown fences:",
+      '{"origin":{"name":string,"lat":number,"lng":number}|null,"area":{"name":string,"lat":number,"lng":number,"radiusKm":number},"duration":"half"|"full","prefs":string[]}',
+      '"area" is where the trip should happen (a city, sub-region, or landmark). Set "radiusKm" to how spread out it is: a single city ~8, a sub-region like the Sharon/Galilee/Carmel ~25, a single landmark ~5.',
+      '"origin" is where the traveler starts if stated (used only for travel direction), else null.',
+      `"prefs" are short English tokens for stated wishes, each one of: ${PREF_TOKENS.join(", ")}. Empty array if none.`,
+      '"duration" is "full" for a full day, otherwise "half".',
+    ].join("\n");
+    const intent = await callModel(endpoint, key, model, intentSys,
+      `Request: ${query}\nDefault duration if unspecified: ${durationHint}`, 300);
 
-  const query: string = typeof body?.query === "string" ? body.query : "";
-  const duration: string = body?.duration === "full" ? "full" : "half";
-  const mustHaves: string[] = Array.isArray(body?.mustHaves) ? body.mustHaves : [];
-  const candidates: any[] = Array.isArray(body?.candidates) ? body.candidates : [];
-  if (candidates.length < 2) return json({ error: "need >= 2 candidates" }, 400);
+    const area = intent?.area;
+    if (!area || !isFinite(+area.lat) || !isFinite(+area.lng)) {
+      return json({ error: "could not resolve a trip area", intent }, 422);
+    }
+    const areaPt: LatLng = { lat: +area.lat, lng: +area.lng };
+    const radiusKm = Math.min(60, Math.max(3, +area.radiusKm || 12));
+    const origin: LatLng | null = intent?.origin && isFinite(+intent.origin.lat) && isFinite(+intent.origin.lng)
+      ? { lat: +intent.origin.lat, lng: +intent.origin.lng } : null;
+    const duration = intent?.duration === "full" ? "full" : durationHint;
+    const prefs = [...new Set([...(Array.isArray(intent?.prefs) ? intent.prefs : []), ...clientPrefs])]
+      .filter((p) => PREF_TOKENS.includes(p));
 
-  const target = duration === "full" ? 6 : 4;
-  const list = candidates
-    .slice(0, 80)
-    .map((c) => `${c.i}: ${c.title} [${Array.isArray(c.cats) && c.cats.length ? c.cats.join(",") : "—"}]`)
-    .join("\n");
+    // --- deterministic geo filter -----------------------------------------
+    const data = await getData();
+    let cands = data.filter((a) => hav(a, areaPt) <= radiusKm);
+    cands = dedupe(cands);
+    if (prefs.includes("free")) cands = cands.filter(isFree);
+    if (cands.length < 2) { // widen once before giving up
+      cands = dedupe(data.filter((a) => hav(a, areaPt) <= radiusKm * 2));
+      if (prefs.includes("free")) cands = cands.filter(isFree);
+    }
+    if (cands.length < 2) return json({ error: "no candidates in area", area: area.name }, 422);
+    cands.forEach((a) => (a._cats = classify(a)));
+    const pool = cands.slice().sort((a, b) => hav(a, areaPt) - hav(b, areaPt)).slice(0, 60);
 
-  const sys = [
-    "You are a local trip planner for the Netanya / Sharon area in Israel.",
-    "Build an ordered itinerary chosen ONLY from the numbered candidates provided.",
-    "Reply with STRICT JSON only — no prose, no markdown fences — matching:",
-    '{"title": string, "intro": string, "stops": [{"i": number, "cat": string, "why": string, "dur": number}]}',
-    `Pick about ${target} stops. "i" must be a candidate index from the list.`,
-    `"cat" must be one of: ${CATS.join(", ")}.`,
-    '"why" is one short sentence in Hebrew. "dur" is minutes (integer, 20-180).',
-    'Write "title" and "intro" in Hebrew; "intro" briefly reflects the user\'s request.',
-    "Honor the must-haves and the free-text request. Do not repeat a place.",
-  ].join("\n");
+    // --- Call B: select & write copy --------------------------------------
+    const target = duration === "full" ? 6 : 4;
+    const list = pool.map((a, i) => `${i}: ${a.title} [${a._cats!.join(",") || "—"}]`).join("\n");
+    const selSys = [
+      `You are a local trip planner for Israel, planning around "${area.name}".`,
+      "Choose an itinerary ONLY from the numbered candidates. Reply with STRICT JSON only:",
+      '{"title":string,"intro":string,"stops":[{"i":number,"cat":string,"why":string,"dur":number}]}',
+      `Pick about ${target} stops. "i" must be a candidate index from the list.`,
+      `"cat" must be one of: ${CATS.join(", ")}.`,
+      '"why" is one short sentence in Hebrew explaining why the stop is worth it — do NOT reference order (no "first"/"last"/"start"/"end"); route order is decided separately.',
+      '"dur" is minutes (integer, 20-180).',
+      `Write "title" and "intro" in Hebrew; "intro" briefly reflects the request and the area "${area.name}".`,
+      "Honor the preferences; do not repeat a place.",
+    ].join("\n");
+    const sel = await callModel(endpoint, key, model, selSys,
+      [`Original request: ${query}`, `Area: ${area.name}`, `Preferences: ${prefs.join(", ") || "(none)"}`,
+        "Candidates (index: title [categories]):", list].join("\n"), 900);
 
-  const user = [
-    `User request (Hebrew): ${query || "(none)"}`,
-    `Must-haves: ${mustHaves.join(", ") || "(none)"}`,
-    `Duration: ${duration}`,
-    "Candidates (index: title [categories]):",
-    list,
-  ].join("\n");
+    if (!sel || !Array.isArray(sel.stops)) return json({ error: "unparseable plan" }, 502);
 
-  // Accept LLM_BASE_URL as the /v1 root OR with /chat/completions already on it.
-  const root = base.replace(/\/+$/, "");
-  const endpoint = /\/chat\/completions$/.test(root) ? root : `${root}/chat/completions`;
+    // resolve indices -> real pins, dedupe, then order by travel direction
+    const seen = new Set<number>();
+    const picked: Array<Place & { _cat: string; _why: string; _dur?: number }> = [];
+    for (const s of sel.stops) {
+      const i = Number(s?.i);
+      if (!Number.isInteger(i) || i < 0 || i >= pool.length || seen.has(i)) continue;
+      seen.add(i);
+      const p = pool[i];
+      const dur = Number(s?.dur);
+      picked.push({
+        ...p,
+        _cat: CATS.includes(s?.cat) ? s.cat : (p._cats?.[0] || "attraction"),
+        _why: typeof s?.why === "string" ? s.why.slice(0, 160) : "",
+        _dur: Number.isFinite(dur) && dur > 0 ? Math.min(240, Math.round(dur)) : undefined,
+      });
+    }
+    if (picked.length < 2) return json({ error: "too few valid stops" }, 502);
+    const ordered = orderByDirection(picked, origin, areaPt) as typeof picked;
 
-  let res: Response;
-  try {
-    res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: sys },
-          { role: "user", content: user },
-        ],
-        temperature: 0.6,
-        max_tokens: 900,
-        response_format: { type: "json_object" }, // honored by most OpenAI-compatible providers
-      }),
+    return json({
+      title: typeof sel.title === "string" ? sel.title.slice(0, 80) : "",
+      intro: typeof sel.intro === "string" ? sel.intro.slice(0, 400) : "",
+      area: area.name,
+      stops: ordered.map((p) => ({
+        title: p.title, lat: p.lat, lng: p.lng, cat: p._cat, why: p._why, durMin: p._dur,
+      })),
     });
   } catch (e) {
-    return json({ error: "provider unreachable", detail: String(e) }, 502);
+    return json({ error: "agent failed", detail: String(e).slice(0, 300) }, 502);
   }
-  if (!res.ok) return json({ error: "provider error", status: res.status, detail: await safeText(res) }, 502);
-
-  const data = await res.json().catch(() => null);
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== "string") return json({ error: "empty completion" }, 502);
-
-  const plan = parseJson(content);
-  if (!plan || !Array.isArray(plan.stops)) return json({ error: "unparseable plan", raw: content.slice(0, 400) }, 502);
-
-  // Sanitize: keep only valid, in-range, non-duplicate indices.
-  const seen = new Set<number>();
-  const stops: any[] = [];
-  for (const s of plan.stops) {
-    const i = Number(s?.i);
-    if (!Number.isInteger(i) || i < 0 || i >= candidates.length || seen.has(i)) continue;
-    seen.add(i);
-    const dur = Number(s?.dur);
-    stops.push({
-      i,
-      cat: CATS.includes(s?.cat) ? s.cat : "attraction",
-      why: typeof s?.why === "string" ? s.why.slice(0, 160) : "",
-      dur: Number.isFinite(dur) && dur > 0 ? Math.min(240, Math.round(dur)) : undefined,
-    });
-  }
-  if (stops.length < 2) return json({ error: "too few valid stops", raw: content.slice(0, 400) }, 502);
-
-  return json({
-    title: typeof plan.title === "string" ? plan.title.slice(0, 80) : "",
-    intro: typeof plan.intro === "string" ? plan.intro.slice(0, 400) : "",
-    stops,
-  });
 });
 
+// ---- helpers ---------------------------------------------------------------
 function json(obj: unknown, status = 200): Response {
   return new Response(JSON.stringify(obj), { status, headers: { ...cors, "Content-Type": "application/json" } });
 }
-
 async function safeText(res: Response): Promise<string> {
-  try {
-    return (await res.text()).slice(0, 300);
-  } catch {
-    return "";
-  }
+  try { return (await res.text()).slice(0, 300); } catch { return ""; }
 }
-
-// Tolerate providers that wrap JSON in prose or ```json fences.
 function parseJson(s: string): any {
-  try {
-    return JSON.parse(s);
-  } catch {
-    /* fall through */
-  }
+  try { return JSON.parse(s); } catch { /* fall through */ }
   const m = s.match(/\{[\s\S]*\}/);
-  if (m) {
-    try {
-      return JSON.parse(m[0]);
-    } catch {
-      /* give up */
-    }
-  }
+  if (m) { try { return JSON.parse(m[0]); } catch { /* give up */ } }
   return null;
 }
