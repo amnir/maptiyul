@@ -141,16 +141,30 @@ async function callModel(deps: PlanDeps, endpoint: string, key: string, model: s
 // JSON-serializable body. Mirrors the HTTP contract 1:1 so the Deno.serve wrapper
 // can simply forward the status and JSON.
 export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = defaultDeps): Promise<PlanResult> {
+  // Per-request id + monotonic start so the interleaved logs of concurrent
+  // invocations can be correlated, and every exit path reports its latency.
+  // All lines share the "[plan]" prefix so they're greppable in the Edge logs.
+  const reqId = Math.random().toString(36).slice(2, 8);
+  const t0 = Date.now();
+  const log = (ev: string, extra: Record<string, unknown> = {}) =>
+    console.log("[plan]", JSON.stringify({ reqId, ev, ms: Date.now() - t0, ...extra }));
+  const fail = (status: number, bodyOut: Record<string, unknown>): PlanResult => {
+    log("return", { status, ...bodyOut });
+    return { status, body: bodyOut };
+  };
+
   const base = env.LLM_BASE_URL;
   const key = env.LLM_API_KEY;
   const model = env.LLM_MODEL;
-  if (!base || !key || !model) return { status: 500, body: { error: "LLM env not configured" } };
+  if (!base || !key || !model) return fail(500, { error: "LLM env not configured" });
   const endpoint = endpointFor(base);
 
   const query: string = typeof body?.query === "string" ? body.query.slice(0, 500) : "";
   const durationHint: string = body?.duration === "full" ? "full" : "half";
   const clientPrefs: string[] = Array.isArray(body?.prefs) ? body.prefs : [];
-  if (!query.trim()) return { status: 400, body: { error: "empty query" } };
+  if (!query.trim()) return fail(400, { error: "empty query" });
+
+  log("request", { query, durationHint, clientPrefs, model });
 
   try {
     // --- Call A: understand the request -----------------------------------
@@ -163,13 +177,15 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
       `"prefs" are short English tokens for stated wishes, each one of: ${PREF_TOKENS.join(", ")}. Empty array if none.`,
       '"duration" is "full" for a full day, otherwise "half".',
     ].join("\n");
+    const tA = Date.now();
     const intent = await callModel(deps, endpoint, key, model, intentSys,
       `Request: ${query}\nDefault duration if unspecified: ${durationHint}`, 300);
+    log("callA", { ms_call: Date.now() - tA });
 
     const area = intent?.area;
     const areaLat = coord(area?.lat), areaLng = coord(area?.lng);
     if (areaLat === null || areaLng === null) {
-      return { status: 422, body: { error: "could not resolve a trip area", intent } };
+      return fail(422, { error: "could not resolve a trip area", intent });
     }
     const areaPt: LatLng = { lat: areaLat, lng: areaLng };
     const areaName = (typeof area.name === "string" && area.name.trim()) ? area.name.trim() : "האזור המבוקש";
@@ -179,6 +195,7 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
     const duration = intent?.duration === "full" ? "full" : durationHint;
     const prefs = [...new Set([...(Array.isArray(intent?.prefs) ? intent.prefs : []), ...clientPrefs])]
       .filter((p) => PREF_TOKENS.includes(p));
+    log("intent", { area: areaName, radiusKm, hasOrigin: !!origin, duration, prefs });
 
     // --- deterministic geo filter -----------------------------------------
     const data = await getData(deps);
@@ -189,7 +206,7 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
       cands = dedupe(data.filter((a) => hav(a, areaPt) <= radiusKm * 2));
       if (prefs.includes("free")) cands = cands.filter(isFree);
     }
-    if (cands.length < 2) return { status: 422, body: { error: "no candidates in area", area: areaName } };
+    if (cands.length < 2) return fail(422, { error: "no candidates in area", area: areaName });
     cands.forEach((a) => (a._cats = classify(a)));
     const pool = cands.slice().sort((a, b) => hav(a, areaPt) - hav(b, areaPt)).slice(0, 60);
 
@@ -209,11 +226,13 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
       `Write "title" and "intro" in Hebrew; "intro" briefly reflects the request and the area "${areaName}".`,
       "Honor the preferences; do not repeat a place.",
     ].join("\n");
+    const tB = Date.now();
     const sel = await callModel(deps, endpoint, key, model, selSys,
       [`Original request: ${query}`, `Area: ${areaName}`, `Preferences: ${prefs.join(", ") || "(none)"}`,
         "Candidates (index: title [categories]):", list].join("\n"), 900);
+    log("callB", { ms_call: Date.now() - tB, candPool: pool.length });
 
-    if (!sel || !Array.isArray(sel.stops)) return { status: 502, body: { error: "unparseable plan" } };
+    if (!sel || !Array.isArray(sel.stops)) return fail(502, { error: "unparseable plan" });
 
     // resolve indices -> real pins, dedupe, then order by travel direction
     const seen = new Set<number>();
@@ -231,13 +250,15 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
         _dur: Number.isFinite(dur) && dur > 0 ? Math.min(240, Math.round(dur)) : undefined,
       });
     }
-    if (picked.length < 2) return { status: 502, body: { error: "too few valid stops" } };
+    if (picked.length < 2) return fail(502, { error: "too few valid stops" });
     const ordered = orderByDirection(picked, origin, areaPt) as typeof picked;
 
+    const title = typeof sel.title === "string" ? sel.title.slice(0, 80) : "";
+    log("ok", { status: 200, title, stops: ordered.map((p) => p.title) });
     return {
       status: 200,
       body: {
-        title: typeof sel.title === "string" ? sel.title.slice(0, 80) : "",
+        title,
         intro: typeof sel.intro === "string" ? sel.intro.slice(0, 400) : "",
         area: areaName,
         stops: ordered.map((p) => ({
@@ -246,6 +267,7 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
       },
     };
   } catch (e) {
+    log("error", { detail: String(e).slice(0, 300) });
     return { status: 502, body: { error: "agent failed", detail: String(e).slice(0, 300) } };
   }
 }
