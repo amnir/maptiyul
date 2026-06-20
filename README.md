@@ -194,3 +194,22 @@ Then paste your project URL and anon key into `SUPABASE_URL` / `SUPABASE_ANON_KE
 near the top of the trip-planner IIFE in `index.html`. Leaving them blank keeps the
 deterministic planner. The endpoint is currently open (anon key only); add rate
 limiting before relying on a paid provider.
+
+**Local iteration (no deploy).** The pipeline lives in `supabase/functions/plan/pipeline.ts`
+as a pure `planTrip(body, env, deps)`; `index.ts` is just the `Deno.serve` HTTP wrapper.
+To try prompt/model changes against the real provider without `supabase functions deploy`,
+run the CLI harness — it loads `supabase/functions/plan/.env` and pretty-prints the plan
+with per-leg haversine distances and the coffee count:
+
+```bash
+brew install deno   # if Deno isn't installed
+deno run --allow-net --allow-env --allow-read \
+  supabase/functions/plan/dev.ts "אני מרמת גן, רוצה טיול חצי יום בשרון" [half|full]
+```
+
+Zero-code alternative — serve the function locally over HTTP (also reads `.env`, no deploy):
+
+```bash
+supabase functions serve --env-file supabase/functions/plan/.env
+# then POST {"query":"…","duration":"half"} to the printed localhost URL
+```
