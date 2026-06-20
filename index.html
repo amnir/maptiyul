@@ -1404,16 +1404,31 @@
 
         const ctrl = new AbortController();
         const to = setTimeout(() => ctrl.abort(), 45000); // two model calls + cold start → allow time
+        const t0 = Date.now();
         let out;
         try {
-          const res = await fetch(PLAN_ENDPOINT, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
-            signal: ctrl.signal,
-            body: JSON.stringify({ query, duration: opts.duration, prefs: [...opts.mustHaves] }),
-          });
-          if (!res.ok) throw new Error("plan endpoint " + res.status);
+          let res;
+          try {
+            res = await fetch(PLAN_ENDPOINT, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
+              signal: ctrl.signal,
+              body: JSON.stringify({ query, duration: opts.duration, prefs: [...opts.mustHaves] }),
+            });
+          } catch (e) {
+            // Distinguish the silent failure modes so the cause is visible in
+            // mobile devtools: abort = our 45s timeout fired; otherwise the
+            // request never reached the server (DNS/CORS/offline).
+            const cause = ctrl.signal.aborted ? "timeout(45s)" : "network/CORS";
+            console.warn(`[plan] fetch failed (${cause}) after ${Date.now() - t0}ms:`, e);
+            throw e;
+          }
+          if (!res.ok) {
+            console.warn(`[plan] HTTP ${res.status} after ${Date.now() - t0}ms`);
+            throw new Error("plan endpoint " + res.status);
+          }
           out = await res.json();
+          console.info(`[plan] ok in ${Date.now() - t0}ms, stops=${out?.stops?.length ?? 0}`);
         } finally {
           clearTimeout(to);
         }
