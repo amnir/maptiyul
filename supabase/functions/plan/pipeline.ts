@@ -158,7 +158,7 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
       "You convert a trip request (Hebrew or English) into JSON, using your knowledge of Israeli geography for WGS84 coordinates.",
       "Output STRICT JSON only — no prose, no markdown fences:",
       '{"origin":{"name":string,"lat":number,"lng":number}|null,"area":{"name":string,"lat":number,"lng":number,"radiusKm":number},"duration":"half"|"full","prefs":string[]}',
-      '"area" is where the trip should happen (a city, sub-region, or landmark). Set "radiusKm" to how spread out it is: a single city ~8, a sub-region like the Sharon/Galilee/Carmel ~25, a single landmark ~5.',
+      '"area" is where the trip should happen (a city, sub-region, or landmark). Write "area.name" in Hebrew. Set "radiusKm" to how spread out it is: a single city ~8, a sub-region like the Sharon/Galilee/Carmel ~25, a single landmark ~5.',
       '"origin" is where the traveler starts if stated (used only for travel direction), else null.',
       `"prefs" are short English tokens for stated wishes, each one of: ${PREF_TOKENS.join(", ")}. Empty array if none.`,
       '"duration" is "full" for a full day, otherwise "half".',
@@ -167,13 +167,15 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
       `Request: ${query}\nDefault duration if unspecified: ${durationHint}`, 300);
 
     const area = intent?.area;
-    if (!area || !isFinite(+area.lat) || !isFinite(+area.lng)) {
+    const areaLat = coord(area?.lat), areaLng = coord(area?.lng);
+    if (areaLat === null || areaLng === null) {
       return { status: 422, body: { error: "could not resolve a trip area", intent } };
     }
-    const areaPt: LatLng = { lat: +area.lat, lng: +area.lng };
+    const areaPt: LatLng = { lat: areaLat, lng: areaLng };
+    const areaName = (typeof area.name === "string" && area.name.trim()) ? area.name.trim() : "האזור המבוקש";
     const radiusKm = Math.min(60, Math.max(3, +area.radiusKm || 12));
-    const origin: LatLng | null = intent?.origin && isFinite(+intent.origin.lat) && isFinite(+intent.origin.lng)
-      ? { lat: +intent.origin.lat, lng: +intent.origin.lng } : null;
+    const oLat = coord(intent?.origin?.lat), oLng = coord(intent?.origin?.lng);
+    const origin: LatLng | null = (oLat !== null && oLng !== null) ? { lat: oLat, lng: oLng } : null;
     const duration = intent?.duration === "full" ? "full" : durationHint;
     const prefs = [...new Set([...(Array.isArray(intent?.prefs) ? intent.prefs : []), ...clientPrefs])]
       .filter((p) => PREF_TOKENS.includes(p));
@@ -187,7 +189,7 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
       cands = dedupe(data.filter((a) => hav(a, areaPt) <= radiusKm * 2));
       if (prefs.includes("free")) cands = cands.filter(isFree);
     }
-    if (cands.length < 2) return { status: 422, body: { error: "no candidates in area", area: area.name } };
+    if (cands.length < 2) return { status: 422, body: { error: "no candidates in area", area: areaName } };
     cands.forEach((a) => (a._cats = classify(a)));
     const pool = cands.slice().sort((a, b) => hav(a, areaPt) - hav(b, areaPt)).slice(0, 60);
 
@@ -195,7 +197,7 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
     const target = duration === "full" ? 6 : 4;
     const list = pool.map((a, i) => `${i}: ${a.title} [${a._cats!.join(",") || "—"}]`).join("\n");
     const selSys = [
-      `You are a local trip planner for Israel, planning around "${area.name}".`,
+      `You are a local trip planner for Israel, planning around "${areaName}".`,
       "Choose an itinerary ONLY from the numbered candidates. Reply with STRICT JSON only:",
       '{"title":string,"intro":string,"stops":[{"i":number,"cat":string,"why":string,"dur":number}]}',
       `Pick about ${target} stops. "i" must be a candidate index from the list.`,
@@ -204,11 +206,11 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
       "Prefer stops close enough to form a sensible route for the available time — avoid long detours.",
       '"why" is ONE short Hebrew sentence on why the place itself is worth visiting. It MUST be position-independent: never reference where the stop falls in the route. Forbidden words: "לסיום","לפתיחה","ראשון","אחרון","להתחיל","לסיים","first","last","start","end". The route order is decided separately afterwards.',
       '"dur" is minutes (integer, 20-180).',
-      `Write "title" and "intro" in Hebrew; "intro" briefly reflects the request and the area "${area.name}".`,
+      `Write "title" and "intro" in Hebrew; "intro" briefly reflects the request and the area "${areaName}".`,
       "Honor the preferences; do not repeat a place.",
     ].join("\n");
     const sel = await callModel(deps, endpoint, key, model, selSys,
-      [`Original request: ${query}`, `Area: ${area.name}`, `Preferences: ${prefs.join(", ") || "(none)"}`,
+      [`Original request: ${query}`, `Area: ${areaName}`, `Preferences: ${prefs.join(", ") || "(none)"}`,
         "Candidates (index: title [categories]):", list].join("\n"), 900);
 
     if (!sel || !Array.isArray(sel.stops)) return { status: 502, body: { error: "unparseable plan" } };
@@ -237,7 +239,7 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
       body: {
         title: typeof sel.title === "string" ? sel.title.slice(0, 80) : "",
         intro: typeof sel.intro === "string" ? sel.intro.slice(0, 400) : "",
-        area: area.name,
+        area: areaName,
         stops: ordered.map((p) => ({
           title: p.title, lat: p.lat, lng: p.lng, cat: p._cat, why: p._why, durMin: p._dur,
         })),
@@ -249,6 +251,16 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
 }
 
 // ---- helpers ---------------------------------------------------------------
+// Accept a coordinate only if it is a real number (or numeric string); rejects
+// null/""/booleans, which the unary + operator would otherwise coerce to 0.
+function coord(x: unknown): number | null {
+  if (typeof x === "number") return Number.isFinite(x) ? x : null;
+  if (typeof x === "string" && x.trim() !== "") {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
 async function safeText(res: Response): Promise<string> {
   try { return (await res.text()).slice(0, 300); } catch { return ""; }
 }
