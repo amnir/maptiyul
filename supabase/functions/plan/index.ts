@@ -83,15 +83,31 @@ function classify(a: Place): string[] {
   return cats;
 }
 
-// Order stops by progress along the origin->area axis (falls back to south->north).
-function orderByDirection(stops: Place[], origin: LatLng | null, area: LatLng): Place[] {
-  if (origin && isFinite(origin.lat) && isFinite(origin.lng)) {
-    const dx = area.lng - origin.lng, dy = area.lat - origin.lat;
-    const len = Math.hypot(dx, dy) || 1;
-    const proj = (p: LatLng) => ((p.lng - origin.lng) * dx + (p.lat - origin.lat) * dy) / len;
-    return stops.slice().sort((a, b) => proj(a) - proj(b));
+// Order stops into a smooth, drivable route: start at the stop nearest the origin
+// (the natural entry point — a trip from the south enters from the south), then
+// greedily hop to the nearest unvisited stop. This keeps the overall travel
+// direction while avoiding the east-west zigzag a pure axis-projection produces.
+// Falls back to a southernmost start when no origin is given.
+function orderByDirection(stops: Place[], origin: LatLng | null, _area: LatLng): Place[] {
+  if (stops.length <= 2) return stops.slice();
+  const remaining = stops.slice();
+  const entryScore = (origin && isFinite(origin.lat) && isFinite(origin.lng))
+    ? (p: LatLng) => hav(origin, p) // nearest to origin = entry point
+    : (p: LatLng) => p.lat;         // else southernmost first
+  let seed = 0;
+  for (let i = 1; i < remaining.length; i++) {
+    if (entryScore(remaining[i]) < entryScore(remaining[seed])) seed = i;
   }
-  return stops.slice().sort((a, b) => a.lat - b.lat); // south -> north default
+  const route = [remaining.splice(seed, 1)[0]];
+  while (remaining.length) {
+    const last = route[route.length - 1];
+    let best = 0;
+    for (let i = 1; i < remaining.length; i++) {
+      if (hav(last, remaining[i]) < hav(last, remaining[best])) best = i;
+    }
+    route.push(remaining.splice(best, 1)[0]);
+  }
+  return route;
 }
 
 // ---- model plumbing --------------------------------------------------------
