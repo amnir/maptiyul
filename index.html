@@ -198,6 +198,11 @@
       cursor: pointer; color: var(--ink); transition: background .12s, border-color .12s, color .12s; }
     .fav-btn:hover { background: #fff7e6; border-color: #f0d9a0; }
     .fav-btn.on { background: #fff2cc; border-color: #f0c14b; color: #8a6d1a; }
+    .basket-add { width: 100%; margin: 0 0 8px; padding: 9px; border: 1px solid var(--line);
+      background: #fff; border-radius: 11px; font-family: inherit; font-size: 13px; font-weight: 700;
+      cursor: pointer; color: var(--ink); transition: background .12s, border-color .12s, color .12s; }
+    .basket-add:hover { background: #eef6f8; border-color: #b8dde4; }
+    .basket-add.on { background: #e1f1f4; border-color: #7fc3cf; color: #155e6b; }
     .pop-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 11px; }
     .pop-tag { font-size: 11px; background: #eef3f5; color: #34566a; padding: 3px 9px; border-radius: 999px; font-weight: 600; }
     .oh { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 7px; }
@@ -363,8 +368,43 @@
     .route-num span { transform: rotate(-45deg); color: #fff; font-weight: 800; font-size: 13px; }
     @media (prefers-reduced-motion: reduce) { .route-num { transition: none; } }
 
+    /* ---- Manual itinerary basket ---- */
+    .basket-panel {
+      position: absolute; top: 14px; left: 14px; z-index: 1100; width: 320px;
+      max-height: calc(100dvh - 28px); background: var(--glass);
+      -webkit-backdrop-filter: blur(20px) saturate(150%); backdrop-filter: blur(20px) saturate(150%);
+      border: 1px solid var(--glass-border); border-radius: 20px; box-shadow: var(--shadow);
+      display: none; flex-direction: column; overflow: hidden; direction: rtl; text-align: right;
+    }
+    .basket-panel.show { display: flex; }
+    .basket-head { position: relative; padding: 16px 18px 12px; border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, rgba(31,122,140,.12), rgba(31,122,140,.04)); }
+    .basket-head .ttl { font-size: 18px; font-weight: 800; margin: 0; }
+    .basket-head .meta { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+    .basket-head .close { position: absolute; top: 12px; left: 12px; border: none; background: rgba(255,255,255,.7);
+      width: 28px; height: 28px; border-radius: 50%; cursor: pointer; font-size: 14px; color: var(--muted); }
+    .basket-body { padding: 8px 12px; overflow-y: auto; flex: 1; }
+    .bstop { display: flex; align-items: center; gap: 7px; padding: 7px 6px; border-radius: 10px; }
+    .bstop:hover { background: rgba(255,255,255,.55); }
+    .bstop .num { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; color: #fff; font-weight: 800;
+      font-size: 13px; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #7c3aed, #1f7a8c); }
+    .bstop .bname { flex: 1; font-weight: 700; font-size: 14px; line-height: 1.3; cursor: pointer;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bstop .ctrl { border: none; background: rgba(255,255,255,.75); color: var(--muted); width: 26px; height: 26px;
+      border-radius: 7px; cursor: pointer; font-size: 12px; flex-shrink: 0; }
+    .bstop .ctrl:hover:not(:disabled) { background: #fff; color: var(--ink); }
+    .bstop .ctrl:disabled { opacity: .3; cursor: default; }
+    .bstop .ctrl.rm:hover { color: #b3261e; }
+    .basket-empty { color: var(--muted); text-align: center; padding: 26px 18px; font-size: 13.5px; line-height: 1.55; }
+    .basket-foot { padding: 12px 16px; border-top: 1px solid var(--line); }
+    .basket-clear { width: 100%; padding: 10px; border: 1px solid var(--line); background: #fff; border-radius: 11px;
+      font-family: inherit; font-size: 13px; font-weight: 700; color: var(--ink); cursor: pointer; }
+    .basket-clear:hover { background: #fce8e8; border-color: #f0b8b8; color: #b3261e; }
+
     @media (max-width: 720px) {
       .trip-panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 72dvh; border-radius: 20px 20px 0 0; }
+      .basket-panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 72dvh; border-radius: 20px 20px 0 0; }
       .fab-plan { bottom: 16px; }
     }
   </style>
@@ -384,6 +424,7 @@
         <div class="quickbar">
           <button id="locate" class="qbtn">📍 קרוב אליי</button>
           <button id="favToggle" class="qbtn"><span>☆ מועדפים (<span id="favCount">0</span>)</span></button>
+          <button id="basketToggle" class="qbtn" title="המסלול הידני שלכם — הוסיפו עצירות וסדרו אותן">🧺 המסלול (<span id="basketCount">0</span>)</button>
           <button id="accToggle" class="qbtn">♿ נגישים</button>
           <button id="nowToggle" class="qbtn" title="מסתיר רק מקומות שידוע שסגורים עכשיו">🟢 פתוח עכשיו</button>
           <button id="satToggle" class="qbtn" title="מסתיר רק מקומות שידוע שסגורים בשבת">🗓️ פתוח בשבת</button>
@@ -456,6 +497,7 @@
       <div class="trip-sheet" id="tripSheet"></div>
     </div>
     <aside id="tripPanel" class="trip-panel"></aside>
+    <aside id="basketPanel" class="basket-panel"></aside>
 
     <div id="map"></div>
   </div>
@@ -498,6 +540,111 @@
       }
       if (state.favOnly) render();
     }
+
+    // ---- Manual itinerary basket (ordered, persisted in the browser) ----
+    // v1: add/remove + reorder. Structured so the AI planner can later fill it
+    // via window.MapTiyulBasket.set([...ids]).
+    const TRIP_KEY = "maptiyul_trip";
+    const byId = new Map(data.map(a => [a.id, a]));
+    let tripStops = [];
+    try { tripStops = JSON.parse(localStorage.getItem(TRIP_KEY) || "[]").filter(id => byId.has(id)); } catch (e) {}
+    function saveTrip() { try { localStorage.setItem(TRIP_KEY, JSON.stringify(tripStops)); } catch (e) {} }
+    function inTrip(id) { return tripStops.includes(id); }
+    function tripBtnLabel(on) { return on ? "✓ במסלול שלי" : "➕ הוסף למסלול"; }
+    function updateTripCount() {
+      document.getElementById("basketCount").textContent = tripStops.length;
+      document.getElementById("basketToggle").classList.toggle("active", tripStops.length > 0);
+    }
+    function toggleTrip(i, btn) {
+      const a = data[i];
+      if (!a) return;
+      const idx = tripStops.indexOf(a.id);
+      if (idx >= 0) tripStops.splice(idx, 1); else tripStops.push(a.id);
+      saveTrip();
+      updateTripCount();
+      if (btn) {
+        const on = inTrip(a.id);
+        btn.classList.toggle("on", on);
+        btn.textContent = tripBtnLabel(on);
+      }
+      renderBasket();
+    }
+    function moveTrip(idx, dir) {
+      const j = idx + dir;
+      if (j < 0 || j >= tripStops.length) return;
+      [tripStops[idx], tripStops[j]] = [tripStops[j], tripStops[idx]];
+      saveTrip();
+      renderBasket();
+    }
+    function removeTrip(idx) {
+      tripStops.splice(idx, 1);
+      saveTrip();
+      updateTripCount();
+      renderBasket();
+    }
+    function clearTrip() {
+      tripStops = [];
+      saveTrip();
+      updateTripCount();
+      renderBasket();
+    }
+    function closeBasket() { document.getElementById("basketPanel").classList.remove("show"); }
+    function openBasket() { renderBasket(); document.getElementById("basketPanel").classList.add("show"); }
+    function renderBasket() {
+      const panel = document.getElementById("basketPanel");
+      if (!panel) return;
+      const head = `<div class="basket-head">
+          <p class="ttl">🧺 המסלול שלי</p>
+          <p class="meta">${tripStops.length ? tripStops.length + " עצירות · לפי הסדר" : "עוד לא הוספתם עצירות"}</p>
+          <button class="close" id="basketClose" aria-label="סגור">✕</button>
+        </div>`;
+      let body;
+      if (!tripStops.length) {
+        body = `<div class="basket-body"><div class="basket-empty">הוסיפו מקומות למסלול דרך כפתור «➕ הוסף למסלול» בחלון של כל מקום.</div></div>`;
+      } else {
+        const rows = tripStops.map((id, k) => {
+          const a = byId.get(id);
+          if (!a) return "";
+          return `<div class="bstop" data-idx="${k}">
+            <span class="num">${k + 1}</span>
+            <span class="bname" data-act="fly">${esc(a.title)}</span>
+            <button class="ctrl up" data-act="up" ${k === 0 ? "disabled" : ""} aria-label="הזז למעלה">▲</button>
+            <button class="ctrl down" data-act="down" ${k === tripStops.length - 1 ? "disabled" : ""} aria-label="הזז למטה">▼</button>
+            <button class="ctrl rm" data-act="rm" aria-label="הסר">✕</button>
+          </div>`;
+        }).join("");
+        body = `<div class="basket-body">${rows}</div>`;
+      }
+      const foot = tripStops.length ? `<div class="basket-foot"><button class="basket-clear" id="basketClear">נקה את המסלול</button></div>` : "";
+      panel.innerHTML = head + body + foot;
+      panel.querySelector("#basketClose").onclick = closeBasket;
+      const clr = panel.querySelector("#basketClear");
+      if (clr) clr.onclick = clearTrip;
+      panel.querySelectorAll(".bstop").forEach(row => {
+        const idx = Number(row.dataset.idx);
+        row.querySelectorAll("[data-act]").forEach(el => {
+          el.onclick = ev => {
+            ev.stopPropagation();
+            const act = el.dataset.act;
+            if (act === "fly") {
+              const a = byId.get(tripStops[idx]);
+              if (a) { flyToPlace(a); if (window.matchMedia("(max-width: 720px)").matches) closeBasket(); }
+            } else if (act === "up") moveTrip(idx, -1);
+            else if (act === "down") moveTrip(idx, 1);
+            else if (act === "rm") removeTrip(idx);
+          };
+        });
+      });
+    }
+    // Hook for the AI planner (or any caller) to populate the manual basket.
+    window.MapTiyulBasket = {
+      get: () => tripStops.slice(),
+      has: inTrip,
+      add: id => { if (byId.has(id) && !inTrip(id)) { tripStops.push(id); saveTrip(); updateTripCount(); renderBasket(); } },
+      set: ids => { tripStops = (ids || []).filter(id => byId.has(id)); saveTrip(); updateTripCount(); renderBasket(); },
+      clear: clearTrip,
+      open: openBasket,
+    };
 
     const map = L.map("map", { zoomControl: true }).setView([31.4, 35.0], 8);
     const baseLayers = {
@@ -772,6 +919,10 @@
       document.getElementById("favToggle").classList.toggle("active", state.favOnly);
       render();
     };
+    document.getElementById("basketToggle").onclick = () => {
+      const p = document.getElementById("basketPanel");
+      if (p.classList.contains("show")) closeBasket(); else openBasket();
+    };
     document.getElementById("accToggle").onclick = () => {
       state.accOnly = !state.accOnly;
       document.getElementById("accToggle").classList.toggle("active", state.accOnly);
@@ -1008,6 +1159,8 @@
       </div>`;
       const on = favorites.has(a.id);
       const fav = `<button class="fav-btn ${on ? "on" : ""}" onclick="toggleFav(${a._i}, this)">${on ? "★ שמור במועדפים" : "☆ הוסף למועדפים"}</button>`;
+      const inT = inTrip(a.id);
+      const basket = `<button class="basket-add ${inT ? "on" : ""}" onclick="toggleTrip(${a._i}, this)">${tripBtnLabel(inT)}</button>`;
       return `${img}<div class="pop-body">
         <p class="pop-title">${esc(a.title)}</p>
         ${dist}
@@ -1019,6 +1172,7 @@
         <div class="pop-weather" data-ll="${a.lat},${a.lng}"></div>
         ${nav}
         ${fav}
+        ${basket}
         <div class="pop-links">${links}</div>
       </div>`;
     }
@@ -1201,6 +1355,8 @@
     };
 
     updateFavCount();
+    updateTripCount();
+    renderBasket();
     const hadView = applyHash();
     hashReady = true;
     render();
