@@ -141,3 +141,75 @@ up the new source filter automatically.
   the entrance and another the town centroid.
 - **Region** uses each source's own tags when present, otherwise latitude bands
   (with a Jerusalem bounding box).
+
+## Trip planner (LLM backend)
+
+The "סוכן תכנון הטיולים" planner has two modes. By default it runs the deterministic,
+client-side generator in `index.html` (no backend, works on GitHub Pages as-is). If a
+Supabase Edge Function is configured, it instead runs a real free-text agent, falling
+back to the deterministic generator on any error — so the feature never hard-breaks.
+
+**How the agent works** (`supabase/functions/plan/index.ts`): the client sends only the
+free-text request (e.g. *"אני מרמת גן, רוצה טיול חצי יום בשרון"*). The function owns the
+dataset (fetched warm-cached from the published `data/attractions.json`) and runs two
+model calls: (A) parse the text into `{origin, area, duration, prefs}` using the model's
+own knowledge of Israeli geography for coordinates; then it filters the dataset to the
+area and (B) selects/orders stops + writes Hebrew copy. Geometry stays deterministic —
+candidates are filtered by haversine and the chosen stops are ordered by projection onto
+the origin→area axis (so a trip from Ramat Gan into the Sharon runs south→north). Stops
+are resolved back to real pins by index (no coordinate hallucination); the client only
+computes times/legs and renders.
+
+The model layer is **vendor-agnostic**: the function talks to any OpenAI-compatible
+`/v1/chat/completions` endpoint (NVIDIA NIM, Groq, OpenRouter, Together, local Ollama…)
+via three env vars — swap the provider with no code change. Prefer a lean text model:
+heavy multimodal/long-context models (e.g. Gemma-4-31B VLM) can exceed the free Edge
+worker's limit (HTTP 546).
+
+**What's committed vs. secret** (this repo is public):
+
+- *Committed:* the function code (`supabase/functions/plan/index.ts`), the client glue
+  in `index.html`, the Supabase **project URL + anon key** (public by design — the anon
+  key is meant to ship in the frontend), and `supabase/functions/plan/.env.example`
+  (names only).
+- *Never committed:* the real `LLM_API_KEY` and the Supabase `service_role` key. These
+  live only as Supabase secrets. `.env` is gitignored.
+
+**Setup** (one-time, all manual — needs a free Supabase project and a model provider):
+
+```bash
+supabase login
+supabase init                     # if supabase/config.toml doesn't exist yet
+supabase link --project-ref <ref> # from your Supabase project's dashboard URL
+
+# set the provider secrets (real values, never committed):
+cp supabase/functions/plan/.env.example supabase/functions/plan/.env
+# edit .env → LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
+supabase secrets set --env-file supabase/functions/plan/.env
+
+supabase functions deploy plan    # deploys the Edge Function
+```
+
+Then paste your project URL and anon key into `SUPABASE_URL` / `SUPABASE_ANON_KEY`
+near the top of the trip-planner IIFE in `index.html`. Leaving them blank keeps the
+deterministic planner. The endpoint is currently open (anon key only); add rate
+limiting before relying on a paid provider.
+
+**Local iteration (no deploy).** The pipeline lives in `supabase/functions/plan/pipeline.ts`
+as a pure `planTrip(body, env, deps)`; `index.ts` is just the `Deno.serve` HTTP wrapper.
+To try prompt/model changes against the real provider without `supabase functions deploy`,
+run the CLI harness — it loads `supabase/functions/plan/.env` and pretty-prints the plan
+with per-leg haversine distances and the coffee count:
+
+```bash
+brew install deno   # if Deno isn't installed
+deno run --allow-net --allow-env --allow-read \
+  supabase/functions/plan/dev.ts "אני מרמת גן, רוצה טיול חצי יום בשרון" [half|full]
+```
+
+Zero-code alternative — serve the function locally over HTTP (also reads `.env`, no deploy):
+
+```bash
+supabase functions serve --env-file supabase/functions/plan/.env
+# then POST {"query":"…","duration":"half"} to the printed localhost URL
+```
