@@ -696,6 +696,9 @@
       state.q = "";
       state.radiusKm = 0;
       state.favOnly = false;
+      state.accOnly = false;
+      state.openNow = false;
+      state.openSat = false;
       state.freeOnly = false;
       state.tags = new Set();
       state.maxDuration = 0;
@@ -710,6 +713,9 @@
       durPills[0].classList.add("active");
       document.getElementById("radius").value = "0";
       document.getElementById("favToggle").classList.remove("active");
+      document.getElementById("accToggle").classList.remove("active");
+      document.getElementById("nowToggle").classList.remove("active");
+      document.getElementById("satToggle").classList.remove("active");
       document.getElementById("freeToggle").classList.remove("active");
       document.getElementById("sortBy").value = "auto";
       render();
