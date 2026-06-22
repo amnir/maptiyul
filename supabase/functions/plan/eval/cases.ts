@@ -3,7 +3,8 @@
 // itinerary picked from the SAME deterministic candidate pool the agent sees,
 // dumped offline with `dump.ts --case <id>` so every title is a real dataset title.
 //
-// Re-author after the dataset changes: `deno task dump <id>` then update `stops`.
+// Re-author after the dataset changes: `deno run --allow-net eval/dump.ts --case <id>`
+// then update `stops`.
 
 import type { GoldCase } from "./score.ts";
 
