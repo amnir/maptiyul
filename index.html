@@ -96,6 +96,7 @@
       font-size: 12px; text-transform: none; letter-spacing: .02em;
       color: var(--muted); margin: 0 0 8px; font-weight: 700;
     }
+    .group h2 .hint { font-weight: 400; opacity: .7; font-size: 11px; }
     .pills { display: flex; flex-wrap: wrap; gap: 6px; }
     .pill {
       border: 1px solid var(--line); background: var(--glass-strong); color: var(--ink);
@@ -110,6 +111,7 @@
     .pill.r-jlem.active { background: var(--r-jlem); }
     .pill.r-south.active { background: var(--r-south); }
     .pill.src.active { background: var(--accent); border-color: transparent; }
+    .pill.tag.active, .pill.dur.active { background: var(--accent); color: #fff; border-color: transparent; }
 
     .types { display: flex; flex-direction: column; gap: 2px; }
     .type-row {
@@ -138,6 +140,10 @@
     .radiuswrap { display: none; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--muted); }
     .radiuswrap.show { display: flex; }
     .radiuswrap select { flex: 1; padding: 7px; border: 1px solid var(--line); border-radius: 9px;
+      font-family: inherit; font-size: 13px; background: var(--glass-strong); }
+    .sortwrap { display: none; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; color: var(--muted); }
+    .sortwrap.show { display: flex; }
+    .sortwrap select { flex: 1; padding: 7px; border: 1px solid var(--line); border-radius: 9px;
       font-family: inherit; font-size: 13px; background: var(--glass-strong); }
     .user-dot { position: relative; width: 16px; height: 16px; border-radius: 50%;
       background: #2f6fd0; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
@@ -381,6 +387,7 @@
           <button id="accToggle" class="qbtn">♿ נגישים</button>
           <button id="nowToggle" class="qbtn" title="מסתיר רק מקומות שידוע שסגורים עכשיו">🟢 פתוח עכשיו</button>
           <button id="satToggle" class="qbtn" title="מסתיר רק מקומות שידוע שסגורים בשבת">🗓️ פתוח בשבת</button>
+          <button id="freeToggle" class="qbtn" title="רק מקומות שהכניסה אליהם חינם">🆓 כניסה חינם</button>
           <button id="share" class="qbtn">🔗 שיתוף</button>
         </div>
         <div id="radiusWrap" class="radiuswrap">
@@ -395,6 +402,15 @@
         </div>
 
         <button id="listToggle" class="listtoggle">📋 הצג רשימת תוצאות</button>
+        <div id="sortWrap" class="sortwrap">
+          <span>מיון:</span>
+          <select id="sortBy">
+            <option value="auto">ברירת מחדל</option>
+            <option value="distance">מרחק</option>
+            <option value="name">שם (א׳–ת׳)</option>
+            <option value="duration">משך ביקור</option>
+          </select>
+        </div>
         <div id="resultsList" class="results"></div>
 
         <button id="resetAll" class="resetall">↺ אפס את כל הסינונים</button>
@@ -402,6 +418,16 @@
         <div class="group">
           <h2>אזור</h2>
           <div class="pills" id="regions"></div>
+        </div>
+
+        <div class="group" id="tagGroup">
+          <h2>מתאים ל… <span class="hint">(בחירת כמה — הצטלבות)</span></h2>
+          <div class="pills" id="tags"></div>
+        </div>
+
+        <div class="group">
+          <h2>משך ביקור</h2>
+          <div class="pills" id="durations"></div>
         </div>
 
         <div class="group" id="sourceGroup">
@@ -518,6 +544,10 @@
       accOnly: false,
       openNow: false,
       openSat: false,
+      freeOnly: false,
+      tags: new Set(),      // empty = no tag filter; multiple selected = intersection (AND)
+      maxDuration: 0,       // 0 = any; otherwise keep places with duration_min <= maxDuration
+      sort: "auto",         // results-list order: auto | distance | name | duration
       listOpen: false,
     };
     let NOW = new Date();
@@ -596,6 +626,63 @@
       typesEl.appendChild(row);
     });
 
+    // ---- Tag chips ("מתאים ל…") — intent filters baked into every record ----
+    const TAG_LABELS = {
+      "kid-friendly": "מתאים לילדים",
+      "rainy-day-ok": "מתאים ליום גשום",
+      "beach": "חוף",
+      "food": "אוכל",
+      "nature": "טבע",
+      "scenic": "נוף",
+      "outdoor": "בחוץ",
+      "indoor": "מקורה",
+      "quick-stop": "עצירה קצרה",
+    };
+    const TAG_ORDER = Object.keys(TAG_LABELS);
+    const tagCounts = {};
+    data.forEach(a => (a.tags || []).forEach(t => tagCounts[t] = (tagCounts[t] || 0) + 1));
+    const tagsPresent = TAG_ORDER.filter(t => tagCounts[t]);
+    const tagPills = {};
+    const tagsEl = document.getElementById("tags");
+    tagsPresent.forEach(t => {
+      const el = document.createElement("button");
+      el.className = "pill tag";
+      el.textContent = `${TAG_LABELS[t]} (${tagCounts[t]})`;
+      el.onclick = () => {
+        if (state.tags.has(t)) { state.tags.delete(t); el.classList.remove("active"); }
+        else { state.tags.add(t); el.classList.add("active"); }
+        render();
+      };
+      tagPills[t] = el;
+      tagsEl.appendChild(el);
+    });
+    if (!tagsPresent.length) document.getElementById("tagGroup").style.display = "none";
+
+    // ---- Duration chips (single-select; 0 = any) ----
+    const DURATION_OPTS = [
+      { v: 0, label: "הכל" },
+      { v: 30, label: "עד חצי שעה" },
+      { v: 60, label: "עד שעה" },
+    ];
+    const durPills = {};
+    const durEl = document.getElementById("durations");
+    DURATION_OPTS.forEach(o => {
+      const el = document.createElement("button");
+      el.className = "pill dur" + (o.v === 0 ? " active" : "");
+      el.textContent = o.label;
+      el.onclick = () => {
+        state.maxDuration = o.v;
+        Object.values(durPills).forEach(p => p.classList.remove("active"));
+        el.classList.add("active");
+        render();
+      };
+      durPills[o.v] = el;
+      durEl.appendChild(el);
+    });
+
+    // Free entry: source already flags it as a type, OSM provides fee=no.
+    function isFreePlace(a) { return (a.types || []).includes("טיולים בחינם") || a.fee === "no"; }
+
     // Narrow the (long) type list without touching which types are selected.
     document.getElementById("typeSearch").addEventListener("input", e => {
       const q = e.target.value.trim().toLowerCase();
@@ -609,13 +696,28 @@
       state.q = "";
       state.radiusKm = 0;
       state.favOnly = false;
+      state.accOnly = false;
+      state.openNow = false;
+      state.openSat = false;
+      state.freeOnly = false;
+      state.tags = new Set();
+      state.maxDuration = 0;
+      state.sort = "auto";
       document.getElementById("search").value = "";
       document.getElementById("typeSearch").value = "";
       allTypes.forEach(t => { typeInputs[t].checked = true; typeRows[t].classList.remove("hide"); });
       Object.values(regionPills).forEach(el => el.classList.add("active"));
       Object.values(sourcePills).forEach(el => el.classList.add("active"));
+      Object.values(tagPills).forEach(el => el.classList.remove("active"));
+      Object.values(durPills).forEach(el => el.classList.remove("active"));
+      durPills[0].classList.add("active");
       document.getElementById("radius").value = "0";
       document.getElementById("favToggle").classList.remove("active");
+      document.getElementById("accToggle").classList.remove("active");
+      document.getElementById("nowToggle").classList.remove("active");
+      document.getElementById("satToggle").classList.remove("active");
+      document.getElementById("freeToggle").classList.remove("active");
+      document.getElementById("sortBy").value = "auto";
       render();
     };
 
@@ -685,12 +787,22 @@
       document.getElementById("satToggle").classList.toggle("active", state.openSat);
       render();
     };
+    document.getElementById("freeToggle").onclick = () => {
+      state.freeOnly = !state.freeOnly;
+      document.getElementById("freeToggle").classList.toggle("active", state.freeOnly);
+      render();
+    };
+    document.getElementById("sortBy").onchange = e => {
+      state.sort = e.target.value;
+      renderList();
+    };
     document.getElementById("listToggle").onclick = () => {
       state.listOpen = !state.listOpen;
       const btn = document.getElementById("listToggle");
       btn.classList.toggle("active", state.listOpen);
       btn.textContent = state.listOpen ? "📋 הסתר רשימה" : "📋 הצג רשימת תוצאות";
       document.getElementById("resultsList").classList.toggle("show", state.listOpen);
+      document.getElementById("sortWrap").classList.toggle("show", state.listOpen);
       renderList();
     };
 
@@ -704,16 +816,23 @@
       const box = document.getElementById("resultsList");
       if (!state.listOpen) { box.innerHTML = ""; return; }
       let shown = markers.filter(m => matches(m._data)).map(m => m._data);
-      shown.sort(userLatLng
-        ? (a, b) => distanceKm(a) - distanceKm(b)
-        : (a, b) => a.title.localeCompare(b.title, "he"));
+      const byName = (a, b) => a.title.localeCompare(b.title, "he");
+      const byDist = (a, b) => distanceKm(a) - distanceKm(b);
+      const byDur = (a, b) => (a.duration_min || 0) - (b.duration_min || 0) || byName(a, b);
+      let cmp;
+      if (state.sort === "name") cmp = byName;
+      else if (state.sort === "duration") cmp = byDur;
+      else cmp = userLatLng ? byDist : byName; // "auto" + "distance" (falls back to name when no location)
+      shown.sort(cmp);
       if (!shown.length) { box.innerHTML = '<div class="empty">אין תוצאות לסינון הנוכחי</div>'; return; }
       const CAP = 300;
       const rows = shown.slice(0, CAP).map(a => {
         const d = distanceKm(a);
-        const meta = d != null
-          ? (d < 1 ? Math.round(d * 1000) + " מ׳" : d.toFixed(1) + " ק״מ")
-          : (a.types && a.types[0] ? a.types[0] : a.region || "");
+        const meta = state.sort === "duration" && a.duration_min
+          ? "כ־" + a.duration_min + " ד׳"
+          : d != null
+            ? (d < 1 ? Math.round(d * 1000) + " מ׳" : d.toFixed(1) + " ק״מ")
+            : (a.types && a.types[0] ? a.types[0] : a.region || "");
         return `<div class="result-row" data-i="${a._i}">
           <span class="rt">${esc(a.title)}</span><span class="rm">${esc(meta)}</span></div>`;
       }).join("");
@@ -954,6 +1073,12 @@
       // Fail open: hide only places known to be closed; keep open + unknown-hours places.
       if (state.openNow && nowStatus(schedFor(a), NOW).status === "closed") return false;
       if (state.openSat && satStatus(schedFor(a), NOW).status === "closed") return false;
+      if (state.freeOnly && !isFreePlace(a)) return false;
+      if (state.maxDuration && (a.duration_min || Infinity) > state.maxDuration) return false;
+      if (state.tags.size) {
+        const at = a.tags || [];
+        for (const t of state.tags) if (!at.includes(t)) return false;
+      }
       const ts = a.types || [];
       if (ts.length === 0) { if (state.types.size === 0) return false; }
       else if (!ts.some(t => state.types.has(t))) return false;
@@ -991,6 +1116,11 @@
       if (state.accOnly) p.set("acc", "1");
       if (state.openNow) p.set("on", "1");
       if (state.openSat) p.set("os", "1");
+      if (state.freeOnly) p.set("free", "1");
+      if (state.maxDuration) p.set("dur", state.maxDuration);
+      const tg = tagsPresent.map((t, i) => state.tags.has(t) ? i : -1).filter(i => i >= 0).join(".");
+      if (tg) p.set("tg", tg);
+      if (state.sort && state.sort !== "auto") p.set("sort", state.sort);
       if (state.radiusKm) p.set("rad", state.radiusKm);
       const c = map.getCenter();
       p.set("v", `${map.getZoom()}/${c.lat.toFixed(5)}/${c.lng.toFixed(5)}`);
@@ -1027,6 +1157,29 @@
       if (p.get("os") === "1") {
         state.openSat = true;
         document.getElementById("satToggle").classList.add("active");
+      }
+      if (p.get("free") === "1") {
+        state.freeOnly = true;
+        document.getElementById("freeToggle").classList.add("active");
+      }
+      if (p.has("dur")) {
+        const d = Number(p.get("dur"));
+        if (durPills[d]) {
+          state.maxDuration = d;
+          Object.values(durPills).forEach(el => el.classList.remove("active"));
+          durPills[d].classList.add("active");
+        }
+      }
+      if (p.has("tg")) {
+        const on = new Set(p.get("tg").split(".").filter(s => s !== "").map(Number));
+        tagsPresent.forEach((t, i) => {
+          if (on.has(i)) { state.tags.add(t); if (tagPills[t]) tagPills[t].classList.add("active"); }
+        });
+      }
+      if (p.has("sort")) {
+        state.sort = p.get("sort");
+        const sb = document.getElementById("sortBy");
+        if (sb) sb.value = state.sort;
       }
       if (p.has("rad")) {
         state.radiusKm = Number(p.get("rad"));
@@ -1251,16 +1404,31 @@
 
         const ctrl = new AbortController();
         const to = setTimeout(() => ctrl.abort(), 45000); // two model calls + cold start → allow time
+        const t0 = Date.now();
         let out;
         try {
-          const res = await fetch(PLAN_ENDPOINT, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
-            signal: ctrl.signal,
-            body: JSON.stringify({ query, duration: opts.duration, prefs: [...opts.mustHaves] }),
-          });
-          if (!res.ok) throw new Error("plan endpoint " + res.status);
+          let res;
+          try {
+            res = await fetch(PLAN_ENDPOINT, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_ANON_KEY}` },
+              signal: ctrl.signal,
+              body: JSON.stringify({ query, duration: opts.duration, prefs: [...opts.mustHaves] }),
+            });
+          } catch (e) {
+            // Distinguish the silent failure modes so the cause is visible in
+            // mobile devtools: abort = our 45s timeout fired; otherwise the
+            // request never reached the server (DNS/CORS/offline).
+            const cause = ctrl.signal.aborted ? "timeout(45s)" : "network/CORS";
+            console.warn(`[plan] fetch failed (${cause}) after ${Date.now() - t0}ms:`, e);
+            throw e;
+          }
+          if (!res.ok) {
+            console.warn(`[plan] HTTP ${res.status} after ${Date.now() - t0}ms`);
+            throw new Error("plan endpoint " + res.status);
+          }
           out = await res.json();
+          console.info(`[plan] ok in ${Date.now() - t0}ms, stops=${out?.stops?.length ?? 0}`);
         } finally {
           clearTimeout(to);
         }
