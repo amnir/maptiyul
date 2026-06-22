@@ -1,0 +1,3 @@
+# Generated eval reports — keep the dir, ignore its contents.
+*
+!.gitignore

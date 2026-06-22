@@ -213,3 +213,9 @@ Zero-code alternative — serve the function locally over HTTP (also reads `.env
 supabase functions serve --env-file supabase/functions/plan/.env
 # then POST {"query":"…","duration":"half"} to the printed localhost URL
 ```
+
+**Eval harness (compare models against a gold reference).** `supabase/functions/plan/eval/`
+grades the agent over a set of *route types* against ideal "god model" itineraries,
+so you can measure how a cheaper `LLM_MODEL` compares. Offline self-test needs no key
+(`deno run --allow-net eval/run.ts --mock`); live runs use the same `.env`. Headline
+metric is selection F1 vs the reference picks. See `eval/README.md`.

@@ -35,7 +35,7 @@ const defaultDeps: PlanDeps = { fetch: (...a) => fetch(...a) };
 // ---- dataset (warm in-memory cache) ----------------------------------------
 let DATA: Place[] | null = null;
 let DATA_AT = 0;
-async function getData(deps: PlanDeps): Promise<Place[]> {
+export async function getData(deps: PlanDeps): Promise<Place[]> {
   if (DATA && Date.now() - DATA_AT < 3_600_000) return DATA;
   const r = await deps.fetch(DATA_URL);
   if (!r.ok) throw new Error("dataset fetch " + r.status);
@@ -53,7 +53,7 @@ export function hav(a: LatLng, b: LatLng): number {
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 const richness = (a: Place) => (a.image ? 2 : 0) + (a.description ? 1 : 0) + (a.address ? 1 : 0);
-function dedupe(arr: Place[]): Place[] {
+export function dedupe(arr: Place[]): Place[] {
   const by: Record<string, Place> = {};
   for (const a of arr) {
     const k = a.lat.toFixed(3) + "," + a.lng.toFixed(3);
@@ -61,8 +61,8 @@ function dedupe(arr: Place[]): Place[] {
   }
   return Object.values(by);
 }
-const isFree = (a: Place) => (a.types || []).includes("טיולים בחינם") || a.fee === "no";
-function classify(a: Place): string[] {
+export const isFree = (a: Place) => (a.types || []).includes("טיולים בחינם") || a.fee === "no";
+export function classify(a: Place): string[] {
   const types = a.types || [];
   const cats: string[] = [];
   if (types.includes("עגלות קפה ופוד טראק")) cats.push("coffee");
@@ -81,6 +81,22 @@ function classify(a: Place): string[] {
     if (types.some((x) => ["פארק שעשועים", "טיולים עם עגלות", "טיולים עם חיות"].includes(x)) || /טרמפולינ|ג'ימבו|פארק שעשוע/.test(hay)) cats.push("kids");
   }
   return cats;
+}
+
+// Deterministic candidate pool the model chooses from: places within `radiusKm`
+// of the area (deduped by rounded coords, optionally free-only), widened once if
+// too sparse, then the 60 nearest to the area centre with `_cats` attached. This
+// is the exact pool Call-B sees; exported so the eval harness can reproduce it
+// offline (no model call) to author gold itineraries from the same candidates.
+export function buildPool(data: Place[], areaPt: LatLng, radiusKm: number, prefs: string[]): Place[] {
+  let cands = dedupe(data.filter((a) => hav(a, areaPt) <= radiusKm));
+  if (prefs.includes("free")) cands = cands.filter(isFree);
+  if (cands.length < 2) { // widen once before giving up
+    cands = dedupe(data.filter((a) => hav(a, areaPt) <= radiusKm * 2));
+    if (prefs.includes("free")) cands = cands.filter(isFree);
+  }
+  cands.forEach((a) => (a._cats = classify(a)));
+  return cands.slice().sort((a, b) => hav(a, areaPt) - hav(b, areaPt)).slice(0, 60);
 }
 
 // Order stops into a smooth, drivable route: start at the stop nearest the origin
@@ -140,7 +156,11 @@ async function callModel(deps: PlanDeps, endpoint: string, key: string, model: s
 // Pure function: takes the parsed request body + env + deps, returns a status +
 // JSON-serializable body. Mirrors the HTTP contract 1:1 so the Deno.serve wrapper
 // can simply forward the status and JSON.
-export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = defaultDeps): Promise<PlanResult> {
+// `opts.debug` adds a non-contractual `_debug` block (parsed intent + the exact
+// candidate pool) to the 200 body — used by the eval harness to score Call-A
+// (intent) and Call-B (selection) separately. The HTTP wrapper never sets it.
+export type PlanOpts = { debug?: boolean };
+export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = defaultDeps, opts: PlanOpts = {}): Promise<PlanResult> {
   // Per-request id + monotonic start so the interleaved logs of concurrent
   // invocations can be correlated, and every exit path reports its latency.
   // All lines share the "[plan]" prefix so they're greppable in the Edge logs.
@@ -199,16 +219,8 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
 
     // --- deterministic geo filter -----------------------------------------
     const data = await getData(deps);
-    let cands = data.filter((a) => hav(a, areaPt) <= radiusKm);
-    cands = dedupe(cands);
-    if (prefs.includes("free")) cands = cands.filter(isFree);
-    if (cands.length < 2) { // widen once before giving up
-      cands = dedupe(data.filter((a) => hav(a, areaPt) <= radiusKm * 2));
-      if (prefs.includes("free")) cands = cands.filter(isFree);
-    }
-    if (cands.length < 2) return fail(422, { error: "no candidates in area", area: areaName });
-    cands.forEach((a) => (a._cats = classify(a)));
-    const pool = cands.slice().sort((a, b) => hav(a, areaPt) - hav(b, areaPt)).slice(0, 60);
+    const pool = buildPool(data, areaPt, radiusKm, prefs);
+    if (pool.length < 2) return fail(422, { error: "no candidates in area", area: areaName });
 
     // --- Call B: select & write copy --------------------------------------
     const target = duration === "full" ? 6 : 4;
@@ -264,6 +276,19 @@ export async function planTrip(body: PlanBody, env: PlanEnv, deps: PlanDeps = de
         stops: ordered.map((p) => ({
           title: p.title, lat: p.lat, lng: p.lng, cat: p._cat, why: p._why, durMin: p._dur,
         })),
+        ...(opts.debug
+          ? {
+            _debug: {
+              intent,
+              area: { name: areaName, lat: areaLat, lng: areaLng, radiusKm },
+              origin,
+              duration,
+              prefs,
+              poolSize: pool.length,
+              pool: pool.map((a) => ({ title: a.title, cats: a._cats })),
+            },
+          }
+          : {}),
       },
     };
   } catch (e) {
