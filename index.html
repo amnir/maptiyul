@@ -1526,12 +1526,17 @@
             return satDay;
           }
         }
+        // The LLM's Saturday plan was missing/too filtered — build a local
+        // deterministic day instead. Tag it so the UI can disclose that this
+        // specific day (unlike Friday) isn't from the smart agent.
         const n = friDay.stops.length;
         const cen = friDay.stops.reduce((acc, s) => ({ lat: acc.lat + s.lat / n, lng: acc.lng + s.lng / n }), { lat: 0, lng: 0 });
-        return generatePlan(dayOpts, {
+        const det = generatePlan(dayOpts, {
           anchor: { name: friDay.areaLabel, lat: cen.lat, lng: cen.lng, radius: 25 },
           satOnly: true, excludeTitles: friTitles, dayLabel: "שבת",
         });
+        if (det) det._localFallback = true;
+        return det;
       }
 
       function generateWeekendDet(opts) {
@@ -1551,7 +1556,9 @@
       const sheet = document.getElementById("tripSheet");
       let routeLayer = null;
 
-      // TRIP = { days: [day, …], di: activeDayIndex, _fallback }
+      // TRIP = { days: [day, …], di: activeDayIndex } — each day carries its
+      // own `_fallback` flag (a weekend plan can have Friday from the agent
+      // and Saturday as a local fallback, or vice versa).
       const cur = () => TRIP.days[TRIP.di];
 
       function gmapsUrl(day) {
@@ -1729,7 +1736,7 @@
             <div class="meta">${esc(day.subtitle)}</div>
             ${tabs}
           </div>
-          <div class="trip-intro"><span class="ai">✨</span><span>${esc(day.intro)}${TRIP._fallback ? " · (מסלול מקומי — הסוכן החכם לא היה זמין)" : ""}</span></div>
+          <div class="trip-intro"><span class="ai">✨</span><span>${esc(day.intro)}${day._fallback ? " · (מסלול מקומי — הסוכן החכם לא היה זמין)" : ""}</span></div>
           <div class="trip-body">${stops}</div>
           <div class="trip-actions">
             <a class="nav" href="${gmapsUrl(day)}" target="_blank" rel="noopener">🧭 פתח את כל המסלול ב-Google Maps</a>
@@ -1825,21 +1832,22 @@
         const iv = setInterval(() => { i++; if (i < msgs.length) txt.textContent = msgs[i]; }, weekend ? 1100 : 700);
         const minWait = new Promise(r => setTimeout(r, 1200)); // avoid a jarring flash
 
-        let days = [], fallback = false;
+        let days = [];
         try {
           if (weekend) {
-            // Two agent calls, one per day; the Saturday query carries an
-            // explicit Shabbat hint for the model, and prepSatDay() enforces
-            // hours locally (dedupe vs. Friday + drop known sat-closed stops).
+            // Two independent agent calls, one per day, run concurrently
+            // (each already takes ~20-35s; sequential would nearly double the
+            // wait). The Saturday query carries an explicit Shabbat hint for
+            // the model, and prepSatDay() enforces hours locally afterwards
+            // (dedupe vs. Friday + drop known sat-closed stops).
             const dayOpts = { mustHaves: opts.mustHaves, duration: "full" };
-            const fri = await generatePlanLLM(dayOpts, query ? query + " — מסלול ליום שישי" : query);
+            const friP = generatePlanLLM(dayOpts, query ? query + " — מסלול ליום שישי" : query);
+            const satP = generatePlanLLM(dayOpts, query + " — מסלול ליום שבת, רק מקומות שפתוחים בשבת")
+              .catch(e => { console.warn("[plan] Saturday agent call failed:", e); return null; });
+            const [fri, satRaw] = await Promise.all([friP, satP]);
             if (fri && fri.stops.length >= 2) {
               fri.dayLabel = "שישי";
-              let sat = null;
-              try {
-                sat = await generatePlanLLM(dayOpts, query + " — מסלול ליום שבת, רק מקומות שפתוחים בשבת");
-              } catch (e) { console.warn("[plan] Saturday agent call failed:", e); }
-              sat = prepSatDay(sat && sat.stops.length >= 2 ? sat : null, fri, dayOpts);
+              const sat = prepSatDay(satRaw && satRaw.stops.length >= 2 ? satRaw : null, fri, dayOpts);
               days = sat ? [fri, sat] : [fri];
             }
           } else {
@@ -1850,10 +1858,14 @@
           console.warn("LLM planner failed, using deterministic fallback:", e);
         }
         if (!days.length) {
-          fallback = true;
           if (weekend) days = generateWeekendDet(opts) || [];
           else { const p = generatePlan(opts); if (p) days = [p]; }
+          days.forEach(d => d._localFallback = true);
         }
+        // Only disclose "local route" when a backend was configured and a
+        // query was actually sent to it (matches each day's own outcome).
+        const showFallback = !!PLAN_ENDPOINT && !!query.trim();
+        days.forEach(d => { d._fallback = !!d._localFallback && showFallback; });
 
         await minWait;
         clearInterval(iv);
@@ -1866,8 +1878,6 @@
           return;
         }
         TRIP = { days, di: 0 };
-        // Only flag "local route" when a backend was configured but didn't answer.
-        TRIP._fallback = fallback && !!PLAN_ENDPOINT && !!query.trim();
         backdrop.classList.remove("show");
         showTrip();
       }
