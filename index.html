@@ -352,6 +352,27 @@
       cursor: pointer; border: none; background: linear-gradient(135deg, #7c3aed, #1f7a8c); color: #fff;
     }
     .trip-actions .redo { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+    .trip-actions .wa { background: #25d366; }
+
+    .trip-tabs { display: flex; gap: 6px; margin-top: 9px; }
+    .trip-tab {
+      flex: 1; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line);
+      background: rgba(255,255,255,.7); font-family: inherit; font-size: 13px; font-weight: 700;
+      cursor: pointer; color: var(--muted); transition: .12s;
+    }
+    .trip-tab.on { background: linear-gradient(135deg, #7c3aed, #1f7a8c); color: #fff; border-color: transparent; }
+
+    .tstop-acts { margin-inline-start: auto; display: flex; gap: 4px; opacity: .55; }
+    .tstop:hover .tstop-acts { opacity: 1; }
+    .tact {
+      border: 1px solid var(--line); background: #fff; border-radius: 8px; width: 24px; height: 24px;
+      font-size: 12px; cursor: pointer; color: var(--muted); line-height: 1; padding: 0; font-family: inherit;
+    }
+    .tact:hover { color: var(--ink); border-color: #c9d3db; background: #f4f7f9; }
+    .satwarn {
+      font-size: 11.5px; color: #b3261e; background: #fce8e8; border-radius: 8px;
+      padding: 3px 8px; margin-top: 4px; display: inline-block; font-weight: 600;
+    }
 
     .route-num {
       width: 30px; height: 30px; border-radius: 50% 50% 50% 2px; transform: rotate(45deg);
@@ -1214,17 +1235,31 @@
     }
 
     // ===================================================================
-    //  AI Trip Planner (beta) — deterministic, client-side, no backend.
-    //  Builds a half/full-day itinerary from real dataset pins via a
-    //  geo + coarse-category prefilter, greedy nearest-neighbor ordering,
-    //  and templated copy. Stands in for an LLM agent (a future /api/plan
-    //  swap) while staying 100% static. Pilot scope: Netanya / Sharon.
+    //  AI Trip Planner (beta) — LLM agent (Supabase Edge Function) with a
+    //  deterministic client-side fallback. Supports half/full-day plans and
+    //  a two-day weekend mode (Friday + Shabbat-aware Saturday). Plans are
+    //  editable (remove/swap stops) and shareable via WhatsApp.
     // ===================================================================
     (function () {
-      // Pilot scope: Netanya / Sharon (densest data). Deterministic, no backend.
-      const ANCHOR = { name: "נתניה / השרון", lat: 32.3215, lng: 34.8532 };
+      const NETANYA = { name: "נתניה / השרון", lat: 32.3215, lng: 34.8532 };
       const RADIUS_KM = 12;
       const TRIP_QUERY = "אני מרמת גן, רוצה טיול חצי יום בשרון";
+
+      // Deterministic-fallback anchor: user location if known, else the map
+      // view — falling back to Netanya (densest data) when the area is empty.
+      function pickAnchor() {
+        const opts = [];
+        if (userLatLng) opts.push({ name: "סביבת המיקום שלך", lat: userLatLng.lat, lng: userLatLng.lng });
+        const c = map.getCenter();
+        opts.push({ name: "האזור שבמפה", lat: c.lat, lng: c.lng });
+        for (const o of opts)
+          for (const r of [RADIUS_KM, 25])
+            if (data.filter(a => hav(a, o) <= r).length >= 30) return { ...o, radius: r };
+        return { ...NETANYA, radius: RADIUS_KM };
+      }
+
+      // Fail open like the map's Saturday filter: keep open + unknown-hours.
+      const satOpenOk = a => satStatus(schedFor(a), new Date()).status !== "closed";
       const CAT = {
         coffee:     { emoji: "☕", kind: "עגלת קפה",       dur: 30 },
         indoor:     { emoji: "🏛️", kind: "פעילות מקורה",   dur: 90 },
@@ -1300,13 +1335,14 @@
           attraction: "אטרקציה מקומית מומלצת באזור.",
         })[cat] || "עצירה מומלצת באזור.";
       }
-      function buildIntro(n, mh, missLabels) {
+      function buildIntro(n, mh, missLabels, anchor, radius, satOnly) {
         const wants = [];
         if (mh.has("coffee")) wants.push("עגלת קפה");
         if (mh.has("indoor")) wants.push("פעילות מקורה");
         if (mh.has("kids")) wants.push("פעילות לילדים");
         if (mh.has("free")) wants.push("כניסה חינם");
-        let s = `סיננתי ${n} מקומות ברדיוס ${RADIUS_KM} ק״מ מנתניה וסידרתי אותם לפי מרחקי נסיעה`;
+        let s = `סיננתי ${n} מקומות ברדיוס ${radius} ק״מ סביב ${anchor.name} וסידרתי אותם לפי מרחקי נסיעה`;
+        if (satOnly) s += `, רק מקומות שלא ידועים כסגורים בשבת`;
         if (wants.length) s += `, עם דגש על ${wants.join(", ")}`;
         s += ".";
         if (missLabels.length) s += ` (לא נמצאה ${missLabels.join(" ו")} מתאימה ברדיוס.)`;
@@ -1314,18 +1350,24 @@
       }
 
       // Build a real itinerary (same shape the UI already renders) from live data.
-      function generatePlan(opts) {
+      // extra: { anchor?, satOnly?, excludeTitles?, dayLabel? } — used by weekend mode.
+      function generatePlan(opts, extra) {
+        extra = extra || {};
+        const anchor = extra.anchor || pickAnchor();
+        const radius = anchor.radius || RADIUS_KM;
         const mh = opts.mustHaves, duration = opts.duration;
         const target = duration === "full" ? 6 : 4;
-        let cands = data.filter(a => hav(a, ANCHOR) <= RADIUS_KM);
+        let cands = data.filter(a => hav(a, anchor) <= radius);
         cands = dedupe(cands);
         if (mh.has("free")) cands = cands.filter(isFree);
+        if (extra.satOnly) cands = cands.filter(satOpenOk);
+        if (extra.excludeTitles) cands = cands.filter(a => !extra.excludeTitles.has(a.title));
         if (!cands.length) return null;
         cands.forEach(a => a._cats = classify(a));
 
         const chosen = [], used = new Set(), missing = [];
         function take(cat) {
-          const from = chosen.length ? chosen[chosen.length - 1].place : ANCHOR;
+          const from = chosen.length ? chosen[chosen.length - 1].place : anchor;
           const pool = cands.filter(a => a._cats.includes(cat) && !used.has(a.id));
           if (!pool.length) return null;
           pool.sort((x, y) => hav(x, from) - hav(y, from));
@@ -1358,13 +1400,18 @@
         const missLabels = missing.filter(x => CAT[x]).map(x => CAT[x].kind);
         return assemblePlan(chosen, opts, {
           candCount: cands.length,
-          intro: buildIntro(cands.length, mh, missLabels),
+          title: (duration === "full" ? "יום מלא" : "חצי יום") + " · " + anchor.name,
+          areaLabel: anchor.name,
+          dayLabel: extra.dayLabel,
+          satMode: extra.satOnly,
+          intro: buildIntro(cands.length, mh, missLabels, anchor, radius, extra.satOnly),
         });
       }
 
       // Compute times, legs, durations and the render-ready stop shape from an
       // ordered [{ place, cat, why?, durMin? }] list. Shared by the deterministic
-      // planner and the LLM planner so both feed the UI identical input.
+      // planner and the LLM planner so both feed the UI identical input. The
+      // returned day keeps `chosen` + `_opts`/`_meta` so edits can re-assemble it.
       function assemblePlan(chosen, opts, meta) {
         meta = meta || {};
         let t = 9 * 60 + 30; // 09:30 start
@@ -1372,6 +1419,7 @@
           c.time = fmt(t);
           c.durMin = c.durMin || c.place.duration_min || (CAT[c.cat] && CAT[c.cat].dur) || 60;
           t += c.durMin;
+          c.leg = null; // recomputed below; a removed last stop must not leave a stale leg
           if (i < chosen.length - 1) {
             const km = hav(c.place, chosen[i + 1].place);
             if (km < 1) { const m = Math.max(5, Math.round(km / 4.5 * 60)); c.leg = { mode: "walk", min: m, km: round1(km) }; t += m; }
@@ -1379,10 +1427,17 @@
           }
         });
         const duration = opts.duration;
+        const areaLabel = meta.areaLabel || "ישראל";
         return {
           candCount: meta.candCount || chosen.length,
-          title: meta.title || (duration === "full" ? "יום מלא בנתניה" : "חצי יום בנתניה"),
-          subtitle: `‏${chosen[0].time}–${fmt(t)} · ${chosen.length} עצירות · ${meta.areaLabel || ANCHOR.name}`,
+          chosen,
+          _opts: { duration },
+          _meta: meta,
+          dayLabel: meta.dayLabel || null,
+          satMode: !!meta.satMode,
+          areaLabel,
+          title: meta.title || `${duration === "full" ? "יום מלא" : "חצי יום"} · ${areaLabel}`,
+          subtitle: `‏${chosen[0].time}–${fmt(t)} · ${chosen.length} עצירות · ${areaLabel}`,
           intro: meta.intro || "",
           stops: chosen.map((c, i) => ({
             time: c.time, dur: `${c.durMin} דק׳`,
@@ -1392,6 +1447,14 @@
             why: c.why || whyFor(c.cat, i), leg: c.leg || null,
           })),
         };
+      }
+
+      // Re-run timing/legs after an edit (remove/swap) without losing the
+      // day's title/intro/labels.
+      function reassembleDay(day) {
+        const fresh = assemblePlan(day.chosen, day._opts, day._meta);
+        day.subtitle = fresh.subtitle;
+        day.stops = fresh.stops;
       }
 
       // LLM planner: the Edge Function owns the dataset and does the work — it
@@ -1445,13 +1508,54 @@
         });
       }
 
+      // ---- Weekend (Friday + Saturday) orchestration ----
+      // Saturday day prep: drop stops repeating Friday and stops known to be
+      // closed on Shabbat; if too little survives, build a deterministic
+      // Shabbat-safe day anchored at the Friday area instead.
+      function prepSatDay(satDay, friDay, dayOpts) {
+        const friTitles = new Set(friDay.stops.map(s => s.title));
+        if (satDay) {
+          let ch = satDay.chosen.filter(c => !friTitles.has(c.place.title));
+          const open = ch.filter(c => { const a = matchStop(c.place); return !a || satOpenOk(a); });
+          if (open.length >= 2) ch = open;
+          if (ch.length >= 2) {
+            satDay.chosen = ch;
+            satDay.dayLabel = "שבת";
+            satDay.satMode = true;
+            reassembleDay(satDay);
+            return satDay;
+          }
+        }
+        const n = friDay.stops.length;
+        const cen = friDay.stops.reduce((acc, s) => ({ lat: acc.lat + s.lat / n, lng: acc.lng + s.lng / n }), { lat: 0, lng: 0 });
+        return generatePlan(dayOpts, {
+          anchor: { name: friDay.areaLabel, lat: cen.lat, lng: cen.lng, radius: 25 },
+          satOnly: true, excludeTitles: friTitles, dayLabel: "שבת",
+        });
+      }
+
+      function generateWeekendDet(opts) {
+        const dayOpts = { mustHaves: opts.mustHaves, duration: "full" };
+        const anchor = pickAnchor();
+        const fri = generatePlan(dayOpts, { anchor, dayLabel: "שישי" });
+        if (!fri) return null;
+        const sat = generatePlan(dayOpts, {
+          anchor, satOnly: true, dayLabel: "שבת",
+          excludeTitles: new Set(fri.stops.map(s => s.title)),
+        });
+        return sat ? [fri, sat] : [fri];
+      }
+
       const panel = document.getElementById("tripPanel");
       const backdrop = document.getElementById("tripBackdrop");
       const sheet = document.getElementById("tripSheet");
       let routeLayer = null;
 
-      function gmapsUrl() {
-        const s = TRIP.stops;
+      // TRIP = { days: [day, …], di: activeDayIndex, _fallback }
+      const cur = () => TRIP.days[TRIP.di];
+
+      function gmapsUrl(day) {
+        const s = day.stops;
         const origin = `${s[0].lat},${s[0].lng}`;
         const dest = `${s[s.length - 1].lat},${s[s.length - 1].lng}`;
         const wp = s.slice(1, -1).map(p => `${p.lat},${p.lng}`);
@@ -1489,10 +1593,11 @@
       function drawRoute() {
         clearRoute();
         routeLayer = L.layerGroup().addTo(map);
-        const latlngs = TRIP.stops.map(s => L.latLng(s.lat, s.lng));
+        const stops = cur().stops;
+        const latlngs = stops.map(s => L.latLng(s.lat, s.lng));
 
         // Numbered pins — added now (so clicks work) but hidden until the line reaches them.
-        TRIP.stops.forEach((s, i) => {
+        stops.forEach((s, i) => {
           const a = matchStop(s);
           const icon = L.divIcon({
             className: "",
@@ -1522,7 +1627,7 @@
         const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         if (reduced) {
           casing.setLatLngs(latlngs); line.setLatLngs(latlngs);
-          TRIP.stops.forEach(s => { s._shown = true; revealMarker(s); });
+          stops.forEach(s => { s._shown = true; revealMarker(s); });
           return;
         }
 
@@ -1541,37 +1646,94 @@
             break;
           }
           casing.setLatLngs(part); line.setLatLngs(part);
-          TRIP.stops.forEach((s, i) => { if (!s._shown && drawn >= cum[i] - 1) { s._shown = true; revealMarker(s); } });
+          stops.forEach((s, i) => { if (!s._shown && drawn >= cum[i] - 1) { s._shown = true; revealMarker(s); } });
           if (p < 1) requestAnimationFrame(frame);
-          else TRIP.stops.forEach(s => { if (!s._shown) { s._shown = true; revealMarker(s); } });
+          else stops.forEach(s => { if (!s._shown) { s._shown = true; revealMarker(s); } });
         }
         requestAnimationFrame(frame);
       }
 
+      // A stop the hours engine knows is closed on Shabbat (fail open on unknown).
+      function stopSatClosed(st) {
+        const a = matchStop(st);
+        return !!a && !satOpenOk(a);
+      }
+
+      // Plain-text itinerary (all days) for WhatsApp / clipboard sharing.
+      function tripText() {
+        const lines = [`✨ ${TRIP.days.length > 1 ? "מסלול סופ״ש — " + cur().areaLabel : cur().title} (MapTiyul)`];
+        TRIP.days.forEach(d => {
+          if (TRIP.days.length > 1) lines.push("", `📅 יום ${d.dayLabel}:`);
+          d.stops.forEach((s, i) => lines.push(`${i + 1}. ${s.time} ${s.emoji} ${s.title} (${s.dur})`));
+          lines.push(`🧭 ניווט: ${gmapsUrl(d)}`);
+        });
+        lines.push("", "נבנה עם MapTiyul → https://amnir.github.io/maptiyul/");
+        return lines.join("\n");
+      }
+
+      function removeStop(i) {
+        const day = cur();
+        if (day.chosen.length <= 2) return;
+        day.chosen.splice(i, 1);
+        reassembleDay(day);
+        showTrip();
+      }
+
+      // Replace a stop with a nearby unused alternative of the same category
+      // (top-5 nearest, random pick → tapping again cycles alternatives).
+      function swapStop(i) {
+        const day = cur();
+        const c = day.chosen[i];
+        const usedTitles = new Set(TRIP.days.flatMap(d => d.stops.map(s => s.title)));
+        let pool = dedupe(data.filter(a => !usedTitles.has(a.title) && hav(a, c.place) <= 15));
+        const sameCat = pool.filter(a => classify(a).includes(c.cat));
+        if (sameCat.length) pool = sameCat;
+        if (day.satMode) { const open = pool.filter(satOpenOk); if (open.length) pool = open; }
+        if (!pool.length) return;
+        pool.sort((x, y) => hav(x, c.place) - hav(y, c.place));
+        const pick = pool[Math.floor(Math.random() * Math.min(5, pool.length))];
+        day.chosen[i] = { place: pick, cat: c.cat, why: whyFor(c.cat, i) };
+        reassembleDay(day);
+        showTrip();
+      }
+
       function panelHTML() {
-        const stops = TRIP.stops.map((st, i) => {
+        const day = cur();
+        const tabs = TRIP.days.length > 1
+          ? `<div class="trip-tabs">` + TRIP.days.map((d, i) =>
+              `<button class="trip-tab ${i === TRIP.di ? "on" : ""}" data-d="${i}">${d.satMode ? "🕯️" : "🌅"} יום ${esc(d.dayLabel || String(i + 1))}</button>`).join("") + `</div>`
+          : "";
+        const stops = day.stops.map((st, i) => {
           const leg = st.leg
             ? `<div class="tleg"><span class="line"></span>${st.leg.mode === "walk" ? "🚶" : "🚗"} ${st.leg.min} דק׳ · ${st.leg.km} ק״מ</div>`
             : "";
+          const warn = day.satMode && stopSatClosed(st)
+            ? `<div class="satwarn">⚠️ ייתכן שסגור בשבת — כדאי לוודא</div>` : "";
+          const del = day.stops.length > 2
+            ? `<button class="tact del" data-i="${i}" title="הסרת העצירה" aria-label="הסרת העצירה">✕</button>` : "";
           return `<div class="tstop" data-i="${i}">
               <div class="num">${i + 1}</div>
               <div class="body">
-                <div class="row1"><span class="time">${esc(st.time)}</span><span class="kind">${st.emoji} ${esc(st.kind)}</span></div>
+                <div class="row1"><span class="time">${esc(st.time)}</span><span class="kind">${st.emoji} ${esc(st.kind)}</span>
+                  <span class="tstop-acts"><button class="tact swap" data-i="${i}" title="החלפה במקום דומה" aria-label="החלפה במקום דומה">⇄</button>${del}</span></div>
                 <div class="name">${esc(st.title)}</div>
                 <div class="why">${esc(st.why)}</div>
+                ${warn}
                 <div class="dur">⏱️ ${esc(st.dur)}</div>
               </div></div>${leg}`;
         }).join("");
         return `
           <div class="trip-phead">
             <button class="close" id="tripClose" aria-label="סגור">✕</button>
-            <p class="ttl">✨ ${esc(TRIP.title)}</p>
-            <div class="meta">${esc(TRIP.subtitle)}</div>
+            <p class="ttl">✨ ${esc(day.title)}</p>
+            <div class="meta">${esc(day.subtitle)}</div>
+            ${tabs}
           </div>
-          <div class="trip-intro"><span class="ai">✨</span><span>${esc(TRIP.intro)}${TRIP._fallback ? " · (מסלול מקומי — הסוכן החכם לא היה זמין)" : ""}</span></div>
+          <div class="trip-intro"><span class="ai">✨</span><span>${esc(day.intro)}${TRIP._fallback ? " · (מסלול מקומי — הסוכן החכם לא היה זמין)" : ""}</span></div>
           <div class="trip-body">${stops}</div>
           <div class="trip-actions">
-            <a class="nav" href="${gmapsUrl()}" target="_blank" rel="noopener">🧭 פתח את כל המסלול ב-Google Maps</a>
+            <a class="nav" href="${gmapsUrl(day)}" target="_blank" rel="noopener">🧭 פתח את כל המסלול ב-Google Maps</a>
+            <a class="nav wa" href="https://wa.me/?text=${encodeURIComponent(tripText())}" target="_blank" rel="noopener">💬 שיתוף המסלול ב-WhatsApp</a>
             <button class="nav redo" id="tripRedo">↻ תכנן מחדש</button>
           </div>`;
       }
@@ -1582,9 +1744,18 @@
         panel.classList.add("show");
         document.getElementById("tripClose").onclick = closeTrip;
         document.getElementById("tripRedo").onclick = () => { closeTrip(); openSheet(); };
+        panel.querySelectorAll(".trip-tab").forEach(el => {
+          el.onclick = () => { TRIP.di = Number(el.dataset.d); showTrip(); };
+        });
+        panel.querySelectorAll(".tact.del").forEach(el => {
+          el.onclick = e => { e.stopPropagation(); removeStop(Number(el.dataset.i)); };
+        });
+        panel.querySelectorAll(".tact.swap").forEach(el => {
+          el.onclick = e => { e.stopPropagation(); swapStop(Number(el.dataset.i)); };
+        });
         panel.querySelectorAll(".tstop").forEach(el => {
           el.onclick = () => {
-            const st = TRIP.stops[Number(el.dataset.i)];
+            const st = cur().stops[Number(el.dataset.i)];
             map.flyTo([st.lat, st.lng], 15, { duration: .6 });
             if (st._m) st._m.openPopup();
           };
@@ -1594,17 +1765,18 @@
       function sheetHTML() {
         return `
           <h2>✨ סוכן תכנון הטיולים</h2>
-          <p class="sub">תארו מאיפה אתם יוצאים ולאן בא לכם לטייל — והסוכן יבנה מסלול אמיתי.<br>למשל: ״אני מרמת גן, רוצה טיול חצי יום בשרון״.</p>
+          <p class="sub">תארו מאיפה אתם יוצאים ולאן בא לכם לטייל — והסוכן יבנה מסלול אמיתי.<br>למשל: ״אני מרמת גן, רוצה טיול חצי יום בשרון״ או ״סופ״ש עם הילדים בגליל״.</p>
           <textarea class="trip-input" id="tripQuery">${esc(TRIP_QUERY)}</textarea>
           <div class="trip-chips" id="tripChips">
             <button class="trip-chip on" data-cat="coffee">☕ עגלת קפה</button>
             <button class="trip-chip on" data-cat="indoor">🏛️ פעילות מקורה</button>
-            <button class="trip-chip" data-cat="kids">👨‍👩‍👧 עם ילדים</button>
+            <button class="trip-chip on" data-cat="kids">👨‍👩‍👧 עם ילדים</button>
             <button class="trip-chip" data-cat="free">🆓 בלי תשלום</button>
           </div>
           <div class="trip-chips" id="tripDur">
             <button class="trip-chip dur on" data-dur="half">⏱️ חצי יום</button>
             <button class="trip-chip dur" data-dur="full">🌅 יום מלא</button>
+            <button class="trip-chip dur" data-dur="weekend">🗓️ סופ״ש שישי–שבת</button>
           </div>
           <button class="trip-go" id="tripGo">בנה לי מסלול ✨</button>
           <button class="trip-cancel" id="tripCancel">ביטול</button>`;
@@ -1624,16 +1796,23 @@
         sheet.querySelectorAll("#tripChips .trip-chip").forEach(c => {
           const r = re[c.dataset.cat]; if (r) c.classList.toggle("on", r.test(v));
         });
-        if (/יום מלא/.test(v)) durBtns.forEach(x => x.classList.toggle("on", x.dataset.dur === "full"));
+        if (/סופ[\s"״׳']?ש|סוף שבוע|שישי[- ־–]?שבת/.test(v)) durBtns.forEach(x => x.classList.toggle("on", x.dataset.dur === "weekend"));
+        else if (/יום מלא/.test(v)) durBtns.forEach(x => x.classList.toggle("on", x.dataset.dur === "full"));
         else if (/חצי יום/.test(v)) durBtns.forEach(x => x.classList.toggle("on", x.dataset.dur === "half"));
       }
 
       async function runThinking() {
         const opts = readOpts();
         const query = (document.getElementById("tripQuery") || {}).value || "";
+        const weekend = opts.duration === "weekend";
 
         // Thinking UI shows immediately; messages cycle while we await the model.
-        const msgs = [
+        const msgs = weekend ? [
+          "קורא את הבקשה שלך…",
+          "מתכנן את יום שישי…",
+          "מתכנן את שבת — רק מקומות פתוחים…",
+          "מסדר לוח זמנים…",
+        ] : [
           "קורא את הבקשה שלך…",
           "סורק מקומות באזור…",
           "בונה רצף עצירות…",
@@ -1643,30 +1822,52 @@
           <div class="trip-think"><div class="trip-spin"></div><div id="thinkTxt">${esc(msgs[0])}</div></div>`;
         const txt = document.getElementById("thinkTxt");
         let i = 0;
-        const iv = setInterval(() => { i++; if (i < msgs.length) txt.textContent = msgs[i]; }, 700);
+        const iv = setInterval(() => { i++; if (i < msgs.length) txt.textContent = msgs[i]; }, weekend ? 1100 : 700);
         const minWait = new Promise(r => setTimeout(r, 1200)); // avoid a jarring flash
 
-        let plan = null, fallback = false;
+        let days = [], fallback = false;
         try {
-          plan = await generatePlanLLM(opts, query);
+          if (weekend) {
+            // Two agent calls, one per day; the Saturday query carries an
+            // explicit Shabbat hint for the model, and prepSatDay() enforces
+            // hours locally (dedupe vs. Friday + drop known sat-closed stops).
+            const dayOpts = { mustHaves: opts.mustHaves, duration: "full" };
+            const fri = await generatePlanLLM(dayOpts, query ? query + " — מסלול ליום שישי" : query);
+            if (fri && fri.stops.length >= 2) {
+              fri.dayLabel = "שישי";
+              let sat = null;
+              try {
+                sat = await generatePlanLLM(dayOpts, query + " — מסלול ליום שבת, רק מקומות שפתוחים בשבת");
+              } catch (e) { console.warn("[plan] Saturday agent call failed:", e); }
+              sat = prepSatDay(sat && sat.stops.length >= 2 ? sat : null, fri, dayOpts);
+              days = sat ? [fri, sat] : [fri];
+            }
+          } else {
+            const p = await generatePlanLLM(opts, query);
+            if (p && p.stops.length >= 2) days = [p];
+          }
         } catch (e) {
           console.warn("LLM planner failed, using deterministic fallback:", e);
         }
-        if (!plan || plan.stops.length < 2) { plan = generatePlan(opts); fallback = true; }
+        if (!days.length) {
+          fallback = true;
+          if (weekend) days = generateWeekendDet(opts) || [];
+          else { const p = generatePlan(opts); if (p) days = [p]; }
+        }
 
         await minWait;
         clearInterval(iv);
 
-        if (!plan || plan.stops.length < 2) {
+        if (!days.length || days[0].stops.length < 2) {
           sheet.innerHTML = `<h2>הופס…</h2>
             <p class="sub">לא הצלחתי לבנות מסלול עם הסינון הזה. נסו להוריד מסנן, או לבחור יום מלא.</p>
             <button class="trip-cancel" id="tripCancel">סגור</button>`;
           document.getElementById("tripCancel").onclick = () => backdrop.classList.remove("show");
           return;
         }
-        TRIP = plan;
+        TRIP = { days, di: 0 };
         // Only flag "local route" when a backend was configured but didn't answer.
-        TRIP._fallback = fallback && !!PLAN_ENDPOINT;
+        TRIP._fallback = fallback && !!PLAN_ENDPOINT && !!query.trim();
         backdrop.classList.remove("show");
         showTrip();
       }
