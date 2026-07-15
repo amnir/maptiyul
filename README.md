@@ -80,6 +80,9 @@ python3 sources/parks.py             # -> data/raw/parks.json
 # tiuli (coordinates already in the pages; resumable):
 python3 sources/tiuli.py             # -> data/raw/tiuli.json
 
+# kidsfun (curated indoor kids venues — geocodes sources/kidsfun_venues.json; resumable):
+python3 sources/kidsfun.py           # -> data/raw/kidsfun.json
+
 # enrichment (optional but recommended; both are resumable):
 python3 enrich/osm.py                # -> data/enrichment/osm_pois.json (one bulk Overpass query)
 python3 enrich/wikipedia.py          # -> data/enrichment/wikipedia.json (~1 req/sec, ~20 min)
@@ -124,6 +127,15 @@ up the new source filter automatically.
   present across every category, so no geocoding. Events (time-bound) and flora/fauna
   (species pages) are intentionally excluded. The on-page description is templated SEO
   filler, so it is left blank for Wikipedia enrichment to fill.
+- **kidsfun** is not a scraper but a hand-curated list (`sources/kidsfun_venues.json`)
+  of indoor play venues for small kids — פעלטון-style משחקיות, ג'ימבורי, soft-play —
+  a category the trip-blog sources don't cover at all. Every entry carries verified
+  opening hours (Saturday included: these venues are typically OPEN on Shabbat, unlike
+  most of the corpus) and an age range in the description. `sources/kidsfun.py`
+  geocodes each venue with Nominatim — mall name first, then street address — rejects
+  hits >12km from the stated city, and caches results in
+  `sources/cache/kidsfun_geocode.json`. To add a venue, append it to the JSON and
+  re-run the script + `build.py`.
 - **OSM enrichment** (`enrich/osm.py`) issues a single bulk Overpass query for named
   POIs across Israel, and `build.py` copies hours/phone/website/wheelchair/fee onto a
   place only on a confident name+distance match (a wrong match would show another

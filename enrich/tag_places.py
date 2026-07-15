@@ -28,6 +28,7 @@ VOCAB = {
 
 COFFEE_TYPE = "עגלות קפה ופוד טראק"
 MUSEUM_TYPE = "מוזיאון, אתר מורשת, מרכז מבקרים ועתיקות"
+KIDSFUN_TYPE = "משחקיות ובילוי מקורה"  # sources/kidsfun.py curated venues
 NATURE_TYPES = ["טיולי פריחה", "נקודות עניין בטבע", "שמורות טבע וגנים לאומיים",
                 "נקודות תצפית", "פארקים לפיקניק", "מסלולי טיול"]
 KIDS_TYPES = ["פארק שעשועים", "טיולים עם עגלות", "טיולים עם חיות"]
@@ -36,8 +37,9 @@ INDOOR_RE = re.compile(
     r"מוזיאון|מרכז מדע|מדע וטכנולוגיה|מרכז מבקרים|מרכז המבקרים|משחקיי|משחקיה|"
     r"אסקייפ|escape|חדר בריחה|חדרי בריחה|טרמפולינ|ג'ימבו|ג׳ימבו|באולינג|"
     r"פלנטריום|פלנת|גלריה|לייזר|נינג'ה|נינג׳ה|אקווריום|מצפה כוכבים|"
-    r"חלל המופלא|אורבניה|בית הראשונים|יקב|קיר טיפוס|תיאטרון|סינמה|קולנוע")
-KIDS_RE = re.compile(r"טרמפולינ|ג'ימבו|ג׳ימבו|משחקיי|משחקיה|ילדים|משפח|שעשוע")
+    r"חלל המופלא|אורבניה|בית הראשונים|יקב|קיר טיפוס|תיאטרון|סינמה|קולנוע|"
+    r"פעלטון|לונדע|סופט פליי|ג'ימבורי|ג׳ימבורי")
+KIDS_RE = re.compile(r"טרמפולינ|ג'ימבו|ג׳ימבו|משחקיי|משחקיה|ילדים|משפח|שעשוע|פעלטון|לונדע")
 BEACH_RE = re.compile(r"חוף|טיילת")
 
 
@@ -48,10 +50,10 @@ def rule_tags(a):
     hay = (a.get("title", "") + " " + " ".join(a.get("keywords", [])) + " " + " ".join(types))
     tags = set()
     is_coffee = COFFEE_TYPE in types
-    is_indoor = MUSEUM_TYPE in types or bool(INDOOR_RE.search(hay))
+    is_indoor = MUSEUM_TYPE in types or KIDSFUN_TYPE in types or bool(INDOOR_RE.search(hay))
     is_beach = "טיולי מים" in types or bool(BEACH_RE.search(hay))
     is_nature = any(t in types for t in NATURE_TYPES)
-    is_kids = any(t in types for t in KIDS_TYPES) or bool(KIDS_RE.search(hay))
+    is_kids = any(t in types for t in KIDS_TYPES) or KIDSFUN_TYPE in types or bool(KIDS_RE.search(hay))
 
     if is_coffee:
         tags |= {"outdoor", "food", "quick-stop"}
